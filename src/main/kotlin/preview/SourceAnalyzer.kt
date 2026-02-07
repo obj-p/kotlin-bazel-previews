@@ -17,9 +17,8 @@ data class FunctionInfo(
 )
 
 object SourceAnalyzer {
-    // Lazy-init PSI environment. Never disposed — acceptable for CLI/test JVM
-    // processes that exit after use. For long-lived processes, call
-    // Disposer.dispose(disposable) on shutdown.
+    // Lazy-init PSI environment. Never disposed — acceptable for a short-lived
+    // CLI process where JVM shutdown reclaims everything.
     private val disposable = Disposer.newDisposable("SourceAnalyzer")
     private val psiProject by lazy {
         KotlinCoreEnvironment.createForProduction(
@@ -44,6 +43,9 @@ object SourceAnalyzer {
             .filter { fn ->
                 !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
                     !fn.hasModifier(KtTokens.SUSPEND_KEYWORD) &&
+                    // Exclude functions with any declared parameters (including those with
+                    // defaults) — PreviewRunner uses Class.getMethod(name) which only
+                    // matches the zero-arg JVM signature.
                     fn.valueParameters.isEmpty() &&
                     fn.receiverTypeReference == null &&
                     fn.typeParameters.isEmpty()

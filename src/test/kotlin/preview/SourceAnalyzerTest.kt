@@ -275,4 +275,84 @@ class SourceAnalyzerTest {
         assertEquals(1, result.size)
         assertEquals("bar", result[0].name)
     }
+
+    @Test
+    fun ignoresCompanionObjectMembers() {
+        val content = """
+            |package myapp
+            |
+            |class Foo {
+            |    companion object {
+            |        fun bar() {}
+            |    }
+            |}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun ignoresInterfaceDefaultMethods() {
+        val content = """
+            |package myapp
+            |
+            |interface I {
+            |    fun bar() {}
+            |}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "I.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun ignoresEnumClassMembers() {
+        val content = """
+            |package myapp
+            |
+            |enum class E {
+            |    A;
+            |    fun bar() {}
+            |}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "E.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun handlesFileJvmNameWithNamedArg() {
+        val content = """
+            |@file:JvmName(name = "Custom")
+            |package myapp
+            |
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        assertEquals(1, result.size)
+        assertEquals("myapp.Custom", result[0].jvmClassName)
+    }
+
+    @Test
+    fun handlesMultipleFileAnnotations() {
+        val content = """
+            |@file:Suppress("UNUSED")
+            |@file:JvmName("Custom")
+            |package myapp
+            |
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        assertEquals(1, result.size)
+        assertEquals("myapp.Custom", result[0].jvmClassName)
+    }
+
+    @Test
+    fun handlesEmptyFile() {
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent("", "Empty.kt")
+        assertTrue(result.isEmpty())
+    }
 }

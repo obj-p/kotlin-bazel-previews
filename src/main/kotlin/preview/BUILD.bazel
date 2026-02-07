@@ -1,9 +1,11 @@
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_binary", "kt_jvm_library")
 
+# Wraps the kotlin-compiler.jar bundled by rules_kotlin (without neverlink)
+# so PSI classes are available at runtime. Internal path — verify on
+# rules_kotlin upgrades.
 java_import(
     name = "kotlin-compiler-psi",
     jars = ["@com_github_jetbrains_kotlin_git//:lib/kotlin-compiler.jar"],
-    visibility = ["//src/test:__subpackages__"],
 )
 
 kt_jvm_library(
