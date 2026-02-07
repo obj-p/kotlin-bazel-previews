@@ -23,22 +23,28 @@ fun main(args: Array<String>) {
         exitProcess(1)
     }
 
+    try {
+        run(workspaceRoot, filePath, sourceFile)
+    } catch (e: Exception) {
+        System.err.println("Error: ${e.message}")
+        exitProcess(1)
+    }
+}
+
+private fun run(workspaceRoot: String, filePath: String, sourceFile: File) {
     println("Finding target for ${File(filePath).name}...")
     val target = BazelRunner.findTarget(workspaceRoot, filePath)
     println("Target: $target")
 
-    println("Building $target...")
+    println("Building and resolving classpath for $target...")
     val classpath = BazelRunner.buildAndResolveClasspath(workspaceRoot, target)
-    println("Build complete.")
-
-    println("Resolving classpath...")
-    println("Found ${classpath.size} classpath entries.")
+    println("Build complete. Found ${classpath.size} classpath entries.")
 
     println("Analyzing $filePath...")
     val functions = SourceAnalyzer.findTopLevelFunctions(sourceFile.absolutePath)
     if (functions.isEmpty()) {
         println("No top-level functions found.")
-        exitProcess(0)
+        return
     }
     println("Found ${functions.size} top-level function${if (functions.size == 1) "" else "s"}: ${functions.joinToString { it.name }}")
 

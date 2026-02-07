@@ -11,3 +11,27 @@ kt_jvm_test(
         "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
     ],
 )
+
+kt_jvm_test(
+    name = "PreviewRunnerTest",
+    srcs = ["PreviewRunnerTest.kt"],
+    test_class = "preview.PreviewRunnerTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)
+
+kt_jvm_test(
+    name = "BazelRunnerTest",
+    srcs = ["BazelRunnerTest.kt"],
+    test_class = "preview.BazelRunnerTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)

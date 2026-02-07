@@ -23,20 +23,41 @@ class SourceAnalyzerTest {
     }
 
     @Test
-    fun findsFunctionWithModifiers() {
+    fun findsFunctionWithInternalModifier() {
         val content = """
             |package myapp
             |
             |internal fun foo(): String = "foo"
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
+        assertEquals(1, result.size)
+        assertEquals("foo", result[0].name)
+        assertEquals("myapp.UtilsKt", result[0].jvmClassName)
+    }
+
+    @Test
+    fun filtersSuspendFunctions() {
+        val content = """
+            |package myapp
             |
             |suspend fun bar() {}
         """.trimMargin()
 
         val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
-        assertEquals(2, result.size)
-        assertEquals("foo", result[0].name)
-        assertEquals("bar", result[1].name)
-        assertEquals("myapp.UtilsKt", result[0].jvmClassName)
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun filtersPrivateFunctions() {
+        val content = """
+            |package myapp
+            |
+            |private fun secret() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Secret.kt")
+        assertTrue(result.isEmpty())
     }
 
     @Test
@@ -50,6 +71,20 @@ class SourceAnalyzerTest {
             |    }
             |}
             |
+            |fun preview() = "ok"
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun ignoresFunctionsWithParameters() {
+        val content = """
+            |package myapp
+            |
+            |fun greet(name: String): String = "Hello"
             |fun preview() = "ok"
         """.trimMargin()
 
@@ -98,15 +133,60 @@ class SourceAnalyzerTest {
     }
 
     @Test
-    fun handlesPrivateModifier() {
+    fun ignoresExtensionFunctions() {
         val content = """
             |package myapp
             |
-            |private fun secret() {}
+            |fun String.exclaim() = this + "!"
+            |fun preview() = "ok"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Secret.kt")
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Ext.kt")
         assertEquals(1, result.size)
-        assertEquals("secret", result[0].name)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun ignoresGenericFunctions() {
+        val content = """
+            |package myapp
+            |
+            |fun <T> identity(x: T): T = x
+            |fun preview() = "ok"
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Generic.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun findsMultipleTopLevelFunctions() {
+        val content = """
+            |package myapp
+            |
+            |fun first() = 1
+            |fun second() = 2
+            |fun third() = 3
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Multi.kt")
+        assertEquals(3, result.size)
+        assertEquals("first", result[0].name)
+        assertEquals("second", result[1].name)
+        assertEquals("third", result[2].name)
+    }
+
+    @Test
+    fun findsInlineTailrecFunctions() {
+        val content = """
+            |package myapp
+            |
+            |inline fun fast() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Inline.kt")
+        assertEquals(1, result.size)
+        assertEquals("fast", result[0].name)
     }
 }

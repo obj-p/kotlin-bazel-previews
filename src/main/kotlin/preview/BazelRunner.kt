@@ -1,10 +1,17 @@
 package preview
 
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 object BazelRunner {
+    private val VALID_FILENAME = Regex("""^[\w.\-]+$""")
+    private const val TIMEOUT_MINUTES = 5L
+
     fun findTarget(workspaceRoot: String, filePath: String): String {
         val filename = File(filePath).name
+        require(VALID_FILENAME.matches(filename)) {
+            "Invalid filename: $filename"
+        }
         val query = "attr(srcs, ':$filename', //...)"
         val output = runCommand(workspaceRoot, "bazelisk", "query", query)
         val targets = output.lines().filter { it.startsWith("//") }
@@ -21,9 +28,11 @@ object BazelRunner {
 
         val execRoot = runCommand(workspaceRoot, "bazelisk", "info", "execution_root").trim()
 
-        val expr = "\"\\n\".join([j.path for p in providers(target).values() " +
-            "if hasattr(p, \"transitive_runtime_jars\") " +
-            "for j in p.transitive_runtime_jars.to_list()])"
+        val expr = """
+            "\n".join([j.path for p in providers(target).values()
+              if hasattr(p, "transitive_runtime_jars")
+              for j in p.transitive_runtime_jars.to_list()])
+        """.trimIndent()
         val cqueryOutput = runCommand(
             workspaceRoot,
             "bazelisk", "cquery", "--output=starlark", "--starlark:expr=$expr", target,
@@ -35,21 +44,33 @@ object BazelRunner {
             .map { "$execRoot/$it" }
     }
 
-    private fun runCommand(workspaceRoot: String, vararg cmd: String): String {
+    fun runCommand(workspaceRoot: String, vararg cmd: String): String {
         val process = ProcessBuilder(*cmd)
             .directory(File(workspaceRoot))
             .start()
 
+        var stderr = ""
         val stderrThread = Thread {
-            process.errorStream.bufferedReader().use { it.readText() }
+            stderr = process.errorStream.bufferedReader().use { it.readText() }
         }.also { it.start() }
 
         val stdout = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
+        val finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)
         stderrThread.join()
 
+        if (!finished) {
+            process.destroyForcibly()
+            throw RuntimeException(
+                "Command timed out after ${TIMEOUT_MINUTES}m: ${cmd.joinToString(" ")}"
+            )
+        }
+
+        val exitCode = process.exitValue()
         if (exitCode != 0) {
-            throw RuntimeException("Command failed (exit $exitCode): ${cmd.joinToString(" ")}")
+            val stderrSuffix = if (stderr.isNotBlank()) "\n${stderr.trim()}" else ""
+            throw RuntimeException(
+                "Command failed (exit $exitCode): ${cmd.joinToString(" ")}$stderrSuffix"
+            )
         }
         return stdout
     }
