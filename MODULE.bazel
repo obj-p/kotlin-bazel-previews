@@ -1,4 +1,4 @@
-module(name = "preview-tool")
+module(name = "kotlin-bazel-previews")
 
 bazel_dep(name = "rules_kotlin", version = "2.2.2")
 bazel_dep(name = "rules_jvm_external", version = "6.6")
