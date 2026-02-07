@@ -189,4 +189,90 @@ class SourceAnalyzerTest {
         assertEquals(1, result.size)
         assertEquals("fast", result[0].name)
     }
+
+    @Test
+    fun handlesFileJvmNameAnnotation() {
+        val content = """
+            |@file:JvmName("Custom")
+            |package myapp
+            |
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+        assertEquals("myapp", result[0].packageName)
+        assertEquals("myapp.Custom", result[0].jvmClassName)
+    }
+
+    @Test
+    fun handlesFileJvmNameDefaultPackage() {
+        val content = """
+            |@file:JvmName("Custom")
+            |
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        assertEquals(1, result.size)
+        assertEquals("Custom", result[0].jvmClassName)
+    }
+
+    @Test
+    fun handlesUnindentedClassMembers() {
+        val content = """
+            |package myapp
+            |
+            |class Foo {
+            |fun bar() {}
+            |}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun findsFunctionWithAnnotation() {
+        val content = """
+            |package myapp
+            |
+            |@Preview
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun findsFunctionWithMultipleAnnotations() {
+        val content = """
+            |package myapp
+            |
+            |@Composable
+            |@Preview
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun ignoresFunctionsWithDefaultParams() {
+        val content = """
+            |package myapp
+            |
+            |fun foo(x: Int = 0) {}
+            |fun bar() {}
+        """.trimMargin()
+
+        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Params.kt")
+        assertEquals(1, result.size)
+        assertEquals("bar", result[0].name)
+    }
 }
