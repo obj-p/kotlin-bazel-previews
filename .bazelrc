@@ -1,0 +1,2 @@
+test --test_output=streamed
+build --strategy=KotlinCompile=worker

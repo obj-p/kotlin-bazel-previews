@@ -1,0 +1,13 @@
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_test")
+
+kt_jvm_test(
+    name = "SourceAnalyzerTest",
+    srcs = ["SourceAnalyzerTest.kt"],
+    test_class = "preview.SourceAnalyzerTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)

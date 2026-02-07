@@ -1,0 +1,18 @@
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_binary", "kt_jvm_library")
+
+kt_jvm_library(
+    name = "preview-lib",
+    srcs = [
+        "BazelRunner.kt",
+        "PreviewRunner.kt",
+        "SourceAnalyzer.kt",
+    ],
+    visibility = ["//src/test:__subpackages__"],
+)
+
+kt_jvm_binary(
+    name = "preview-tool",
+    srcs = ["Main.kt"],
+    main_class = "preview.MainKt",
+    deps = [":preview-lib"],
+)
