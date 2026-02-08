@@ -29,6 +29,7 @@ class SourceAnalyzer : Closeable {
     }
 
     fun findTopLevelFunctions(filePath: String): List<FunctionInfo> {
+        check(!disposed) { "SourceAnalyzer has been closed" }
         val file = File(filePath)
         return findTopLevelFunctionsFromContent(file.readText(), file.name)
     }
