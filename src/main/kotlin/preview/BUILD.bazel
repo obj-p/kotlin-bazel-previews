@@ -12,11 +12,18 @@ kt_jvm_library(
     name = "preview-lib",
     srcs = [
         "BazelRunner.kt",
+        "DirectCompiler.kt",
+        "FileWatcher.kt",
+        "PatchingClassLoader.kt",
         "PreviewRunner.kt",
+        "PreviewServer.kt",
         "SourceAnalyzer.kt",
     ],
     visibility = ["//src/test:__subpackages__"],
-    deps = [":kotlin-compiler-psi"],
+    deps = [
+        ":kotlin-compiler-psi",
+        "@maven//:io_methvin_directory_watcher",
+    ],
 )
 
 kt_jvm_binary(

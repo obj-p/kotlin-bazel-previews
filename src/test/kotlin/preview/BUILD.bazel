@@ -35,3 +35,39 @@ kt_jvm_test(
         "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
     ],
 )
+
+kt_jvm_test(
+    name = "PatchingClassLoaderTest",
+    srcs = ["PatchingClassLoaderTest.kt"],
+    test_class = "preview.PatchingClassLoaderTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)
+
+kt_jvm_test(
+    name = "DirectCompilerTest",
+    srcs = ["DirectCompilerTest.kt"],
+    test_class = "preview.DirectCompilerTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)
+
+kt_jvm_test(
+    name = "FileWatcherTest",
+    srcs = ["FileWatcherTest.kt"],
+    test_class = "preview.FileWatcherTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)

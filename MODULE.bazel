@@ -11,7 +11,10 @@ use_repo(rules_kotlin_extensions, "com_github_google_ksp", "com_github_jetbrains
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     name = "maven",
-    artifacts = ["junit:junit:4.13.2"],
+    artifacts = [
+        "io.methvin:directory-watcher:0.18.0",
+        "junit:junit:4.13.2",
+    ],
     repositories = ["https://repo1.maven.org/maven2"],
 )
 use_repo(maven, "maven")

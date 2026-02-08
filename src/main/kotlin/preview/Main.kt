@@ -4,13 +4,16 @@ import java.io.File
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
-    if (args.size != 2) {
-        System.err.println("Usage: preview-tool <workspaceRoot> <kotlinFilePath>")
+    val watch = args.contains("--watch")
+    val positional = args.filter { it != "--watch" }
+
+    if (positional.size != 2) {
+        System.err.println("Usage: preview-tool [--watch] <workspaceRoot> <kotlinFilePath>")
         exitProcess(1)
     }
 
-    val workspaceRoot = args[0]
-    val filePath = args[1]
+    val workspaceRoot = positional[0]
+    val filePath = positional[1]
 
     val wsDir = File(workspaceRoot)
     if (!wsDir.isDirectory) {
@@ -24,14 +27,18 @@ fun main(args: Array<String>) {
     }
 
     try {
-        run(workspaceRoot, filePath, sourceFile)
+        if (watch) {
+            PreviewServer(workspaceRoot, filePath).run()
+        } else {
+            runOnce(workspaceRoot, filePath, sourceFile)
+        }
     } catch (e: Exception) {
         System.err.println("Error: ${e.message}")
         exitProcess(1)
     }
 }
 
-private fun run(workspaceRoot: String, filePath: String, sourceFile: File) {
+private fun runOnce(workspaceRoot: String, filePath: String, sourceFile: File) {
     println("Finding target for ${File(filePath).name}...")
     val target = BazelRunner.findTarget(workspaceRoot, filePath)
     println("Target: $target")
