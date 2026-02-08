@@ -1,10 +1,22 @@
 package preview
 
+import org.junit.AfterClass
+import org.junit.BeforeClass
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class SourceAnalyzerTest {
+    companion object {
+        private lateinit var analyzer: SourceAnalyzer
+
+        @BeforeClass @JvmStatic
+        fun setUp() { analyzer = SourceAnalyzer() }
+
+        @AfterClass @JvmStatic
+        fun tearDown() { analyzer.close() }
+    }
+
     @Test
     fun findsSimpleTopLevelFunction() {
         val content = """
@@ -15,7 +27,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
         assertEquals("myapp", result[0].packageName)
@@ -30,7 +42,7 @@ class SourceAnalyzerTest {
             |internal fun foo(): String = "foo"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
         assertEquals(1, result.size)
         assertEquals("foo", result[0].name)
         assertEquals("myapp.UtilsKt", result[0].jvmClassName)
@@ -44,7 +56,7 @@ class SourceAnalyzerTest {
             |suspend fun bar() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -56,7 +68,7 @@ class SourceAnalyzerTest {
             |private fun secret() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Secret.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Secret.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -74,7 +86,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -88,7 +100,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -101,7 +113,7 @@ class SourceAnalyzerTest {
             |fun doSomething() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "App.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "App.kt")
         assertEquals("com.example.app", result[0].packageName)
         assertEquals("com.example.app.AppKt", result[0].jvmClassName)
     }
@@ -112,7 +124,7 @@ class SourceAnalyzerTest {
             |fun topLevel() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Script.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Script.kt")
         assertEquals(1, result.size)
         assertEquals("", result[0].packageName)
         assertEquals("ScriptKt", result[0].jvmClassName)
@@ -128,7 +140,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -141,7 +153,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Ext.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Ext.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -155,7 +167,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Generic.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Generic.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -170,7 +182,7 @@ class SourceAnalyzerTest {
             |fun third() = 3
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Multi.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Multi.kt")
         assertEquals(3, result.size)
         assertEquals("first", result[0].name)
         assertEquals("second", result[1].name)
@@ -185,7 +197,7 @@ class SourceAnalyzerTest {
             |inline fun fast() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Inline.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Inline.kt")
         assertEquals(1, result.size)
         assertEquals("fast", result[0].name)
     }
@@ -199,7 +211,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
         assertEquals("myapp", result[0].packageName)
@@ -214,7 +226,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("Custom", result[0].jvmClassName)
     }
@@ -229,7 +241,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -242,7 +254,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -257,7 +269,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -271,7 +283,7 @@ class SourceAnalyzerTest {
             |fun bar() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Params.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Params.kt")
         assertEquals(1, result.size)
         assertEquals("bar", result[0].name)
     }
@@ -288,7 +300,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -302,7 +314,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "I.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "I.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -317,7 +329,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "E.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "E.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -330,7 +342,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("myapp.Custom", result[0].jvmClassName)
     }
@@ -345,14 +357,14 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("myapp.Custom", result[0].jvmClassName)
     }
 
     @Test
     fun handlesEmptyFile() {
-        val result = SourceAnalyzer.findTopLevelFunctionsFromContent("", "Empty.kt")
+        val result = analyzer.findTopLevelFunctionsFromContent("", "Empty.kt")
         assertTrue(result.isEmpty())
     }
 }

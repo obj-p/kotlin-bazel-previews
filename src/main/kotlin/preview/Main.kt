@@ -41,7 +41,7 @@ private fun run(workspaceRoot: String, filePath: String, sourceFile: File) {
     println("Build complete. Found ${classpath.size} classpath entries.")
 
     println("Analyzing $filePath...")
-    val functions = SourceAnalyzer.findTopLevelFunctions(sourceFile.absolutePath)
+    val functions = SourceAnalyzer().use { it.findTopLevelFunctions(sourceFile.absolutePath) }
     if (functions.isEmpty()) {
         println("No top-level functions found.")
         return

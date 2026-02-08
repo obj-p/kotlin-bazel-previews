@@ -1,6 +1,7 @@
 package preview
 
 import com.intellij.openapi.util.Disposer
+import java.io.Closeable
 import java.io.File
 import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
@@ -16,10 +17,9 @@ data class FunctionInfo(
     val jvmClassName: String,
 )
 
-object SourceAnalyzer {
-    // Lazy-init PSI environment. Never disposed — acceptable for a short-lived
-    // CLI process where JVM shutdown reclaims everything.
+class SourceAnalyzer : Closeable {
     private val disposable = Disposer.newDisposable("SourceAnalyzer")
+    private var disposed = false
     private val psiProject by lazy {
         KotlinCoreEnvironment.createForProduction(
             disposable,
@@ -34,6 +34,7 @@ object SourceAnalyzer {
     }
 
     fun findTopLevelFunctionsFromContent(content: String, fileName: String): List<FunctionInfo> {
+        check(!disposed) { "SourceAnalyzer has been closed" }
         val ktFile = KtPsiFactory(psiProject, markGenerated = false).createFile(fileName, content)
         val packageName = ktFile.packageFqName.asString()
         val jvmClassName = deriveJvmClassName(ktFile, fileName, packageName)
@@ -66,5 +67,12 @@ object SourceAnalyzer {
             ?.getArgumentExpression()?.text?.removeSurrounding("\"")
         val baseName = jvmName ?: (fileName.removeSuffix(".kt") + "Kt")
         return if (packageName.isEmpty()) baseName else "$packageName.$baseName"
+    }
+
+    override fun close() {
+        if (!disposed) {
+            disposed = true
+            Disposer.dispose(disposable)
+        }
     }
 }
