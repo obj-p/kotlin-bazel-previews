@@ -19,7 +19,7 @@ data class FunctionInfo(
 
 class SourceAnalyzer : Closeable {
     private val disposable = Disposer.newDisposable("SourceAnalyzer")
-    private var disposed = false
+    @Volatile private var disposed = false
     private val psiProject by lazy {
         KotlinCoreEnvironment.createForProduction(
             disposable,
@@ -70,6 +70,7 @@ class SourceAnalyzer : Closeable {
         return if (packageName.isEmpty()) baseName else "$packageName.$baseName"
     }
 
+    @Synchronized
     override fun close() {
         if (!disposed) {
             disposed = true
