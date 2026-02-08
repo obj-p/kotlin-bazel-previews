@@ -27,6 +27,7 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |fun preview() {
             |    println("hello")
             |}
@@ -44,6 +45,7 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |internal fun foo(): String = "foo"
         """.trimMargin()
 
@@ -58,6 +60,7 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |suspend fun bar() {}
         """.trimMargin()
 
@@ -70,6 +73,7 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |private fun secret() {}
         """.trimMargin()
 
@@ -88,6 +92,7 @@ class SourceAnalyzerTest {
             |    }
             |}
             |
+            |@Preview
             |fun preview() = "ok"
         """.trimMargin()
 
@@ -102,6 +107,7 @@ class SourceAnalyzerTest {
             |package myapp
             |
             |fun greet(name: String): String = "Hello"
+            |@Preview
             |fun preview() = "ok"
         """.trimMargin()
 
@@ -115,6 +121,7 @@ class SourceAnalyzerTest {
         val content = """
             |package com.example.app
             |
+            |@Preview
             |fun doSomething() {}
         """.trimMargin()
 
@@ -126,6 +133,7 @@ class SourceAnalyzerTest {
     @Test
     fun handlesDefaultPackage() {
         val content = """
+            |@Preview
             |fun topLevel() {}
         """.trimMargin()
 
@@ -155,6 +163,7 @@ class SourceAnalyzerTest {
             |package myapp
             |
             |fun String.exclaim() = this + "!"
+            |@Preview
             |fun preview() = "ok"
         """.trimMargin()
 
@@ -169,6 +178,7 @@ class SourceAnalyzerTest {
             |package myapp
             |
             |fun <T> identity(x: T): T = x
+            |@Preview
             |fun preview() = "ok"
         """.trimMargin()
 
@@ -182,8 +192,11 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |fun first() = 1
+            |@Preview
             |fun second() = 2
+            |@Preview
             |fun third() = 3
         """.trimMargin()
 
@@ -199,6 +212,7 @@ class SourceAnalyzerTest {
         val content = """
             |package myapp
             |
+            |@Preview
             |inline fun fast() {}
         """.trimMargin()
 
@@ -213,6 +227,7 @@ class SourceAnalyzerTest {
             |@file:JvmName("Custom")
             |package myapp
             |
+            |@Preview
             |fun preview() {}
         """.trimMargin()
 
@@ -228,6 +243,7 @@ class SourceAnalyzerTest {
         val content = """
             |@file:JvmName("Custom")
             |
+            |@Preview
             |fun preview() {}
         """.trimMargin()
 
@@ -285,6 +301,7 @@ class SourceAnalyzerTest {
             |package myapp
             |
             |fun foo(x: Int = 0) {}
+            |@Preview
             |fun bar() {}
         """.trimMargin()
 
@@ -344,6 +361,7 @@ class SourceAnalyzerTest {
             |@file:JvmName(name = "Custom")
             |package myapp
             |
+            |@Preview
             |fun preview() {}
         """.trimMargin()
 
@@ -359,6 +377,7 @@ class SourceAnalyzerTest {
             |@file:JvmName("Custom")
             |package myapp
             |
+            |@Preview
             |fun preview() {}
         """.trimMargin()
 
@@ -379,6 +398,7 @@ class SourceAnalyzerTest {
         file.writeText("""
             |package sample
             |
+            |@Preview
             |fun greet() = "hi"
         """.trimMargin())
 
@@ -387,5 +407,48 @@ class SourceAnalyzerTest {
         assertEquals("greet", result[0].name)
         assertEquals("sample", result[0].packageName)
         assertEquals("sample.SampleKt", result[0].jvmClassName)
+    }
+
+    @Test
+    fun filtersUnannotatedFunctions() {
+        val content = """
+            |package myapp
+            |
+            |fun plain() {}
+            |
+            |@Preview
+            |fun preview() {}
+        """.trimMargin()
+
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Mix.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+    }
+
+    @Test
+    fun findsPreviewWithArguments() {
+        val content = """
+            |package myapp
+            |
+            |@Preview(name = "dark", showBackground = true)
+            |fun darkPreview() {}
+        """.trimMargin()
+
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        assertEquals(1, result.size)
+        assertEquals("darkPreview", result[0].name)
+    }
+
+    @Test
+    fun findsPreviewOnSameLine() {
+        val content = """
+            |package myapp
+            |
+            |@Preview fun inlinePreview() {}
+        """.trimMargin()
+
+        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        assertEquals(1, result.size)
+        assertEquals("inlinePreview", result[0].name)
     }
 }

@@ -43,7 +43,8 @@ class SourceAnalyzer : Closeable {
         return ktFile.declarations
             .filterIsInstance<KtNamedFunction>()
             .filter { fn ->
-                !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
+                fn.annotationEntries.any { it.shortName?.asString() == "Preview" } &&
+                    !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
                     !fn.hasModifier(KtTokens.SUSPEND_KEYWORD) &&
                     // Exclude functions with any declared parameters (including those with
                     // defaults) — PreviewRunner uses Class.getMethod(name) which only
