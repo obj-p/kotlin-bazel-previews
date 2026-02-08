@@ -2,4 +2,3 @@ bazel-bin
 bazel-out
 bazel-testlogs
 bazel-kotlin-bazel-previews
-bazel-preview-tool
