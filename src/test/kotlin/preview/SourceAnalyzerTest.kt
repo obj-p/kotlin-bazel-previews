@@ -2,11 +2,16 @@ package preview
 
 import org.junit.AfterClass
 import org.junit.BeforeClass
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class SourceAnalyzerTest {
+    @get:Rule
+    val tmpDir = TemporaryFolder()
+
     companion object {
         private lateinit var analyzer: SourceAnalyzer
 
@@ -366,5 +371,21 @@ class SourceAnalyzerTest {
     fun handlesEmptyFile() {
         val result = analyzer.findTopLevelFunctionsFromContent("", "Empty.kt")
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun findTopLevelFunctions_readsFromFile() {
+        val file = tmpDir.newFile("Sample.kt")
+        file.writeText("""
+            |package sample
+            |
+            |fun greet() = "hi"
+        """.trimMargin())
+
+        val result = analyzer.findTopLevelFunctions(file.absolutePath)
+        assertEquals(1, result.size)
+        assertEquals("greet", result[0].name)
+        assertEquals("sample", result[0].packageName)
+        assertEquals("sample.SampleKt", result[0].jvmClassName)
     }
 }

@@ -14,13 +14,7 @@ object BazelRunner {
         }
         val query = "attr(srcs, ':$filename', //...)"
         val output = runCommand(workspaceRoot, "bazelisk", "query", query)
-        val targets = output.lines().filter { it.startsWith("//") }
-        if (targets.size != 1) {
-            throw RuntimeException(
-                "Expected exactly 1 target for $filename, found ${targets.size}: $targets"
-            )
-        }
-        return targets[0]
+        return parseTargets(output, filename)
     }
 
     fun buildAndResolveClasspath(workspaceRoot: String, target: String): List<String> {
@@ -38,6 +32,20 @@ object BazelRunner {
             "bazelisk", "cquery", "--output=starlark", "--starlark:expr=$expr", target,
         )
 
+        return parseClasspath(execRoot, cqueryOutput)
+    }
+
+    fun parseTargets(queryOutput: String, filename: String): String {
+        val targets = queryOutput.lines().filter { it.startsWith("//") }
+        if (targets.size != 1) {
+            throw RuntimeException(
+                "Expected exactly 1 target for $filename, found ${targets.size}: $targets"
+            )
+        }
+        return targets[0]
+    }
+
+    fun parseClasspath(execRoot: String, cqueryOutput: String): List<String> {
         return cqueryOutput.lines()
             .map { it.trim() }
             .filter { it.endsWith(".jar") }

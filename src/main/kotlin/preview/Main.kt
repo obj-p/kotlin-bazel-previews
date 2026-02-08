@@ -4,16 +4,16 @@ import java.io.File
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
-    val watch = args.contains("--watch")
-    val positional = args.filter { it != "--watch" }
-
-    if (positional.size != 2) {
-        System.err.println("Usage: preview-tool [--watch] <workspaceRoot> <kotlinFilePath>")
+    val parsed = try {
+        parseArgs(args)
+    } catch (e: IllegalArgumentException) {
+        System.err.println(e.message)
         exitProcess(1)
     }
 
-    val workspaceRoot = positional[0]
-    val filePath = positional[1]
+    val workspaceRoot = parsed.workspaceRoot
+    val filePath = parsed.filePath
+    val watch = parsed.watch
 
     val wsDir = File(workspaceRoot)
     if (!wsDir.isDirectory) {

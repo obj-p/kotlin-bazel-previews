@@ -83,3 +83,15 @@ kt_jvm_test(
         "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
     ],
 )
+
+kt_jvm_test(
+    name = "MainTest",
+    srcs = ["MainTest.kt"],
+    test_class = "preview.MainTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)

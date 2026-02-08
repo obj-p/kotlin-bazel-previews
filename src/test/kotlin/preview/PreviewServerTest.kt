@@ -2,6 +2,7 @@ package preview
 
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class PreviewServerTest {
     @Test
@@ -51,5 +52,65 @@ class PreviewServerTest {
         val name = "my \"special\" fun"
         val result = jsonString(name)
         assertEquals("\"my \\\"special\\\" fun\"", result)
+    }
+
+    // --- buildJsonOutput tests ---
+
+    private fun fn(name: String) = FunctionInfo(name = name, packageName = "pkg", jvmClassName = "pkg.TestKt")
+
+    @Test
+    fun buildJsonOutput_emptyFunctions_returnsEmptyArray() {
+        val json = buildJsonOutput(emptyList()) { null }
+        assertEquals("{\"functions\":[]}", json)
+    }
+
+    @Test
+    fun buildJsonOutput_singleSuccess_returnsResultJson() {
+        val json = buildJsonOutput(listOf(fn("hello"))) { "world" }
+        assertEquals(
+            "{\"functions\":[\n  {\"name\":\"hello\",\"result\":\"world\"}\n]}",
+            json,
+        )
+    }
+
+    @Test
+    fun buildJsonOutput_singleNullResult_returnsNullInJson() {
+        val json = buildJsonOutput(listOf(fn("hello"))) { null }
+        assertEquals(
+            "{\"functions\":[\n  {\"name\":\"hello\",\"result\":null}\n]}",
+            json,
+        )
+    }
+
+    @Test
+    fun buildJsonOutput_singleError_returnsErrorJson() {
+        val json = buildJsonOutput(listOf(fn("boom"))) { throw RuntimeException("kaboom") }
+        assertEquals(
+            "{\"functions\":[\n  {\"name\":\"boom\",\"error\":\"kaboom\"}\n]}",
+            json,
+        )
+    }
+
+    @Test
+    fun buildJsonOutput_multipleFunctions_mixedResults() {
+        val fns = listOf(fn("ok"), fn("fail"), fn("nil"))
+        val json = buildJsonOutput(fns) { fi ->
+            when (fi.name) {
+                "ok" -> "good"
+                "fail" -> throw RuntimeException("bad")
+                else -> null
+            }
+        }
+        assertTrue(json.contains("\"name\":\"ok\",\"result\":\"good\""))
+        assertTrue(json.contains("\"name\":\"fail\",\"error\":\"bad\""))
+        assertTrue(json.contains("\"name\":\"nil\",\"result\":null"))
+    }
+
+    @Test
+    fun buildJsonOutput_specialCharsInNameAndResult() {
+        val fi = FunctionInfo(name = "a\"b", packageName = "", jvmClassName = "TestKt")
+        val json = buildJsonOutput(listOf(fi)) { "line1\nline2" }
+        assertTrue(json.contains("\"a\\\"b\""))
+        assertTrue(json.contains("\"line1\\nline2\""))
     }
 }

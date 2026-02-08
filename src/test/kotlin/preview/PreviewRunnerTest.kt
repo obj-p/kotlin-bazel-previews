@@ -5,6 +5,8 @@ import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class PreviewRunnerTest {
     @get:Rule
@@ -94,5 +96,76 @@ class PreviewRunnerTest {
 
         val result = compileAndInvoke(source, "CustomReturn", "get")
         assertEquals("custom-value", result)
+    }
+
+    @Test
+    fun throwsClassNotFoundForMissingClass() {
+        val fn = FunctionInfo(name = "foo", packageName = "", jvmClassName = "NoSuchClass")
+        assertFailsWith<ClassNotFoundException> {
+            PreviewRunner.invoke(emptyList(), fn)
+        }
+    }
+
+    @Test
+    fun throwsNoSuchMethodForMissingMethod() {
+        val source = """
+            public class HasFoo {
+                public static String foo() { return "foo"; }
+            }
+        """.trimIndent()
+
+        val srcDir = tmpDir.newFolder("src-missing")
+        val outDir = tmpDir.newFolder("classes-missing")
+        val srcFile = java.io.File(srcDir, "HasFoo.java")
+        srcFile.writeText(source)
+
+        val javac = ProcessBuilder("javac", "-d", outDir.absolutePath, srcFile.absolutePath)
+            .redirectErrorStream(true).start()
+        javac.inputStream.bufferedReader().readText()
+        javac.waitFor()
+
+        val fn = FunctionInfo(name = "bar", packageName = "", jvmClassName = "HasFoo")
+        assertFailsWith<NoSuchMethodException> {
+            PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
+        }
+    }
+
+    @Test
+    fun throwsForNonStaticMethod() {
+        val source = """
+            public class InstanceOnly {
+                public String greet() { return "hi"; }
+            }
+        """.trimIndent()
+
+        val srcDir = tmpDir.newFolder("src-instance")
+        val outDir = tmpDir.newFolder("classes-instance")
+        val srcFile = java.io.File(srcDir, "InstanceOnly.java")
+        srcFile.writeText(source)
+
+        val javac = ProcessBuilder("javac", "-d", outDir.absolutePath, srcFile.absolutePath)
+            .redirectErrorStream(true).start()
+        javac.inputStream.bufferedReader().readText()
+        javac.waitFor()
+
+        val fn = FunctionInfo(name = "greet", packageName = "", jvmClassName = "InstanceOnly")
+        // Invoking a non-static method with null receiver should throw
+        val ex = assertFailsWith<Exception> {
+            PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
+        }
+        assertTrue(ex is NullPointerException || ex is IllegalArgumentException,
+            "Expected NPE or IAE, got: ${ex::class.simpleName}: ${ex.message}")
+    }
+
+    @Test
+    fun handlesVoidReturnType() {
+        val source = """
+            public class VoidMethod {
+                public static void doNothing() { }
+            }
+        """.trimIndent()
+
+        val result = compileAndInvoke(source, "VoidMethod", "doNothing")
+        assertNull(result)
     }
 }

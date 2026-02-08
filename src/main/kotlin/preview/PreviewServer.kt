@@ -116,26 +116,11 @@ class PreviewServer(
 
     private fun renderPreview(usePatchDir: Boolean = false) {
         val functions = analyzer.findTopLevelFunctions(sourceFile.absolutePath)
-        if (functions.isEmpty()) {
-            System.out.println("{\"functions\":[]}")
-            System.out.flush()
-            return
+        val invoker: (FunctionInfo) -> String? = { fn ->
+            if (usePatchDir) invokeFastPath(fn) else PreviewRunner.invoke(cachedClasspath, fn)
         }
-
-        val results = mutableListOf<String>()
-        for (fn in functions) {
-            try {
-                val result: String? = if (usePatchDir) {
-                    invokeFastPath(fn)
-                } else {
-                    PreviewRunner.invoke(cachedClasspath, fn)
-                }
-                results.add("  {\"name\":${jsonString(fn.name)},\"result\":${jsonString(result)}}")
-            } catch (e: Exception) {
-                results.add("  {\"name\":${jsonString(fn.name)},\"error\":${jsonString(e.message)}}")
-            }
-        }
-        System.out.println("{\"functions\":[\n${results.joinToString(",\n")}\n]}")
+        val json = buildJsonOutput(functions, invoker)
+        System.out.println(json)
         System.out.flush()
     }
 
@@ -165,6 +150,24 @@ class PreviewServer(
         analyzer.close()
         scratchDir.deleteRecursively()
     }
+}
+
+fun buildJsonOutput(
+    functions: List<FunctionInfo>,
+    invoker: (FunctionInfo) -> String?,
+): String {
+    if (functions.isEmpty()) return "{\"functions\":[]}"
+
+    val results = mutableListOf<String>()
+    for (fn in functions) {
+        try {
+            val result = invoker(fn)
+            results.add("  {\"name\":${jsonString(fn.name)},\"result\":${jsonString(result)}}")
+        } catch (e: Exception) {
+            results.add("  {\"name\":${jsonString(fn.name)},\"error\":${jsonString(e.message)}}")
+        }
+    }
+    return "{\"functions\":[\n${results.joinToString(",\n")}\n]}"
 }
 
 fun jsonString(value: String?): String {

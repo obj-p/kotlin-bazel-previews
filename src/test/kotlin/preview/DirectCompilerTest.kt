@@ -141,4 +141,27 @@ class DirectCompilerTest {
             DirectCompiler.compile(listOf(srcFile), emptyList(), tmpdirItself)
         }
     }
+
+    @Test
+    fun compilesMultipleSourceFiles() {
+        val stdlib = findKotlinStdlib()
+        assumeNotNull(stdlib)
+
+        val helperFile = tmpDir.newFile("Helper.kt")
+        helperFile.writeText("""
+            fun helperValue(): String = "from-helper"
+        """.trimIndent())
+
+        val mainFile = tmpDir.newFile("Caller.kt")
+        mainFile.writeText("""
+            fun callHelper(): String = helperValue()
+        """.trimIndent())
+
+        val outDir = File(tmpDir.root, "multi-out")
+        val result = DirectCompiler.compile(listOf(helperFile, mainFile), listOf(stdlib!!), outDir)
+
+        assertTrue(result.success, "Multi-source compilation should succeed: ${result.diagnostics}")
+        assertTrue(File(outDir, "HelperKt.class").exists(), "HelperKt.class should exist")
+        assertTrue(File(outDir, "CallerKt.class").exists(), "CallerKt.class should exist")
+    }
 }

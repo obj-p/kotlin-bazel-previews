@@ -11,6 +11,7 @@ java_import(
 kt_jvm_library(
     name = "preview-lib",
     srcs = [
+        "Args.kt",
         "BazelRunner.kt",
         "DirectCompiler.kt",
         "FileWatcher.kt",
