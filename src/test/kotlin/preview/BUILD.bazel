@@ -71,3 +71,15 @@ kt_jvm_test(
         "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
     ],
 )
+
+kt_jvm_test(
+    name = "PreviewServerTest",
+    srcs = ["PreviewServerTest.kt"],
+    test_class = "preview.PreviewServerTest",
+    deps = [
+        "//src/main/kotlin/preview:preview-lib",
+        "@maven//:junit_junit",
+        "@rules_kotlin//kotlin/compiler:kotlin-test",
+        "@rules_kotlin//kotlin/compiler:kotlin-test-junit",
+    ],
+)

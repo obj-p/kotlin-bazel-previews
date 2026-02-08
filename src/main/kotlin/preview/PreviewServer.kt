@@ -33,11 +33,12 @@ class PreviewServer(
         val shutdownLatch = CountDownLatch(1)
         val mainThread = Thread.currentThread()
 
-        Runtime.getRuntime().addShutdownHook(Thread {
+        val shutdownHook = Thread {
             close()
             shutdownLatch.countDown()
             mainThread.interrupt()
-        })
+        }
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
 
         // Initial build and warmup run on the main thread before the FileWatcher starts,
         // so there is no concurrent access to cachedClasspath/cachedTarget yet. The
@@ -68,6 +69,7 @@ class PreviewServer(
         } finally {
             watcher.close()
             close()
+            try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: IllegalStateException) { }
         }
     }
 
@@ -98,7 +100,7 @@ class PreviewServer(
             }
             System.err.println("[server] Fast compile failed, falling back to Bazel build...")
             try {
-                fullBuild()
+                fullBuild(invalidateTarget = true)
                 renderPreview()
             } catch (e: Exception) {
                 System.err.println("[server] Bazel build failed: ${e.message}")
@@ -106,7 +108,8 @@ class PreviewServer(
         }
     }
 
-    private fun fullBuild() {
+    private fun fullBuild(invalidateTarget: Boolean = false) {
+        if (invalidateTarget) cachedTarget = null
         val target = cachedTarget ?: BazelRunner.findTarget(workspaceRoot, filePath).also { cachedTarget = it }
         cachedClasspath = BazelRunner.buildAndResolveClasspath(workspaceRoot, target)
     }
@@ -127,9 +130,9 @@ class PreviewServer(
                 } else {
                     PreviewRunner.invoke(cachedClasspath, fn)
                 }
-                results.add("  {\"name\":\"${fn.name}\",\"result\":${jsonString(result)}}")
+                results.add("  {\"name\":${jsonString(fn.name)},\"result\":${jsonString(result)}}")
             } catch (e: Exception) {
-                results.add("  {\"name\":\"${fn.name}\",\"error\":${jsonString(e.message)}}")
+                results.add("  {\"name\":${jsonString(fn.name)},\"error\":${jsonString(e.message)}}")
             }
         }
         System.out.println("{\"functions\":[\n${results.joinToString(",\n")}\n]}")
@@ -164,7 +167,7 @@ class PreviewServer(
     }
 }
 
-private fun jsonString(value: String?): String {
+fun jsonString(value: String?): String {
     if (value == null) return "null"
     val sb = StringBuilder(value.length + 2)
     sb.append('"')

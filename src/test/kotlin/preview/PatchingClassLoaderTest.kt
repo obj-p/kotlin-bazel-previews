@@ -170,4 +170,37 @@ class PatchingClassLoaderTest {
             assertTrue(resources.isEmpty())
         }
     }
+
+    @Test
+    fun rejectsPathTraversalInFindResource() {
+        val patchDir = tmpDir.newFolder("patch")
+        // Create a file outside patchDir that a traversal would reach
+        File(tmpDir.root, "secret.txt").writeText("secret")
+
+        val loader = PatchingClassLoader(patchDir, emptyList())
+        loader.use {
+            assertNull(it.getResource("../secret.txt"))
+        }
+    }
+
+    @Test
+    fun rejectsPathTraversalInFindClass() {
+        val patchDir = tmpDir.newFolder("patch")
+        // Create a .class file outside patchDir
+        val outsideDir = tmpDir.newFolder("outside")
+        compileJava("""
+            public class Escaped {
+                public static String value() { return "escaped"; }
+            }
+        """.trimIndent(), "Escaped", outsideDir)
+
+        val loader = PatchingClassLoader(patchDir, emptyList())
+        loader.use {
+            // A class name that would resolve to ../outside/Escaped.class
+            // is blocked by the containment check, so ClassNotFoundException is thrown
+            assertFailsWith<ClassNotFoundException> {
+                it.loadClass("..outside.Escaped")
+            }
+        }
+    }
 }

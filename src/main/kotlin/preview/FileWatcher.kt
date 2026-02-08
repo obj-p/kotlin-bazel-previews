@@ -32,7 +32,10 @@ class FileWatcher(
                 scheduleFlush(path)
             }
             .build()
-        watcher!!.watchAsync()
+        watcher!!.watchAsync().exceptionally { e ->
+            System.err.println("[watcher] Directory watcher failed: ${e.message}")
+            null
+        }
     }
 
     private fun scheduleFlush(path: Path) {

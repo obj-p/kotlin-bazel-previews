@@ -29,8 +29,9 @@ object DirectCompiler {
         classpath: List<String>,
         outputDir: File,
     ): CompileResult {
-        require(outputDir.canonicalFile.startsWith(tmpRoot)) {
-            "outputDir must be under java.io.tmpdir: $outputDir"
+        val canonicalOut = outputDir.canonicalFile
+        require(canonicalOut.startsWith(tmpRoot) && canonicalOut != tmpRoot) {
+            "outputDir must be a subdirectory of java.io.tmpdir ($tmpRoot), got: $outputDir"
         }
         outputDir.deleteRecursively()
         outputDir.mkdirs()

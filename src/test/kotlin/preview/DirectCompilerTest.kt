@@ -127,6 +127,18 @@ class DirectCompilerTest {
         val ex = kotlin.test.assertFailsWith<IllegalArgumentException> {
             DirectCompiler.compile(listOf(srcFile), emptyList(), badDir)
         }
-        assertTrue(ex.message!!.contains("java.io.tmpdir"), "Error should mention tmpdir constraint")
+        assertTrue(ex.message!!.contains("java.io.tmpdir") || ex.message!!.contains("subdirectory"),
+            "Error should mention tmpdir constraint: ${ex.message}")
+    }
+
+    @Test
+    fun rejectsTmpdirItselfAsOutputDir() {
+        val srcFile = tmpDir.newFile("Hello.kt")
+        srcFile.writeText("fun hello() {}")
+
+        val tmpdirItself = File(System.getProperty("java.io.tmpdir"))
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            DirectCompiler.compile(listOf(srcFile), emptyList(), tmpdirItself)
+        }
     }
 }
