@@ -10,6 +10,10 @@ fun parseArgs(args: Array<String>): ParsedArgs {
     val watch = args.contains("--watch")
     val positional = args.filter { it != "--watch" }
 
+    for (arg in positional) {
+        require(!arg.startsWith("--")) { "Unknown flag: $arg" }
+    }
+
     require(positional.size == 2) {
         "Usage: preview-tool [--watch] <workspaceRoot> <kotlinFilePath>"
     }

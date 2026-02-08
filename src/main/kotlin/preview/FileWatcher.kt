@@ -67,7 +67,10 @@ class FileWatcher(
             pendingTask?.cancel()
             pendingTask = null
         }
-        timer.cancel()
-        watcher?.close()
+        try {
+            timer.cancel()
+        } finally {
+            watcher?.close()
+        }
     }
 }

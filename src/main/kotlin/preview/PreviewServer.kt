@@ -126,19 +126,7 @@ class PreviewServer(
 
     private fun invokeFastPath(fn: FunctionInfo): String? {
         val urls = cachedClasspath.map { File(it).toURI().toURL() }
-        val loader = PatchingClassLoader(scratchDir, urls)
-        return try {
-            val clazz = loader.loadClass(fn.jvmClassName)
-            val method = clazz.getMethod(fn.name)
-            val result = method.invoke(null)
-            // Convert to string before closing the classloader — the result object's class
-            // may have been loaded by this classloader, so toString() must complete first.
-            result?.toString()
-        } catch (e: java.lang.reflect.InvocationTargetException) {
-            throw e.cause ?: e
-        } finally {
-            loader.close()
-        }
+        return PreviewRunner.invoke(PatchingClassLoader(scratchDir, urls), fn)
     }
 
     private fun close() {

@@ -51,4 +51,11 @@ class MainTest {
             parseArgs(emptyArray())
         }
     }
+
+    @Test
+    fun parseArgs_unknownFlag_throws() {
+        assertFailsWith<IllegalArgumentException> {
+            parseArgs(arrayOf("--verbose", "/workspace", "src/Main.kt"))
+        }
+    }
 }

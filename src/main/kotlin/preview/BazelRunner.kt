@@ -1,6 +1,7 @@
 package preview
 
 import java.io.File
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 object BazelRunner {
@@ -57,21 +58,22 @@ object BazelRunner {
             .directory(File(workspaceRoot))
             .start()
 
-        var stderr = ""
-        val stderrThread = Thread {
-            stderr = process.errorStream.bufferedReader().use { it.readText() }
-        }.also { it.start() }
+        val stderrFuture = CompletableFuture.supplyAsync {
+            process.errorStream.bufferedReader().use { it.readText() }
+        }
 
         val stdout = process.inputStream.bufferedReader().use { it.readText() }
         val finished = process.waitFor(TIMEOUT_MINUTES, TimeUnit.MINUTES)
-        stderrThread.join()
 
         if (!finished) {
             process.destroyForcibly()
+            stderrFuture.join()
             throw RuntimeException(
                 "Command timed out after ${TIMEOUT_MINUTES}m: ${cmd.joinToString(" ")}"
             )
         }
+
+        val stderr = stderrFuture.join()
 
         val exitCode = process.exitValue()
         if (exitCode != 0) {
