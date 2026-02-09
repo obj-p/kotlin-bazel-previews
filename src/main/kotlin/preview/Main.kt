@@ -48,12 +48,12 @@ private fun runOnce(workspaceRoot: String, filePath: String, sourceFile: File) {
     println("Build complete. Found ${classpath.size} classpath entries.")
 
     println("Analyzing $filePath...")
-    val functions = SourceAnalyzer().use { it.findTopLevelFunctions(sourceFile.absolutePath) }
+    val functions = SourceAnalyzer().use { it.findPreviewFunctions(sourceFile.absolutePath) }
     if (functions.isEmpty()) {
-        println("No top-level functions found.")
+        println("No @Preview functions found.")
         return
     }
-    println("Found ${functions.size} top-level function${if (functions.size == 1) "" else "s"}: ${functions.joinToString { it.name }}")
+    println("Found ${functions.size} @Preview function${if (functions.size == 1) "" else "s"}: ${functions.joinToString { it.name }}")
 
     for (fn in functions) {
         println("Invoking ${fn.name}()...")

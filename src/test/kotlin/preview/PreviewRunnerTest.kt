@@ -12,7 +12,12 @@ class PreviewRunnerTest {
     @get:Rule
     val tmpDir = TemporaryFolder()
 
-    private fun compileAndInvoke(javaSource: String, className: String, methodName: String): Any? {
+    private fun compileAndInvoke(
+        javaSource: String,
+        className: String,
+        methodName: String,
+        containerKind: ContainerKind = ContainerKind.TOP_LEVEL,
+    ): Any? {
         val srcDir = tmpDir.newFolder("src")
         val outDir = tmpDir.newFolder("classes")
 
@@ -33,6 +38,7 @@ class PreviewRunnerTest {
             name = methodName,
             packageName = "",
             jvmClassName = className,
+            containerKind = containerKind,
         )
         return PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
     }
@@ -167,5 +173,67 @@ class PreviewRunnerTest {
 
         val result = compileAndInvoke(source, "VoidMethod", "doNothing")
         assertNull(result)
+    }
+
+    // --- New tests for object/class invocation ---
+
+    @Test
+    fun invokesObjectInstanceMethod() {
+        // Mimics Kotlin object: private ctor, public static final INSTANCE field
+        val source = """
+            public class ObjTarget {
+                public static final ObjTarget INSTANCE = new ObjTarget();
+                private ObjTarget() {}
+                public String hello() {
+                    return "from-object";
+                }
+            }
+        """.trimIndent()
+
+        val result = compileAndInvoke(source, "ObjTarget", "hello", ContainerKind.OBJECT)
+        assertEquals("from-object", result)
+    }
+
+    @Test
+    fun invokesClassInstanceMethod() {
+        // Regular class with public no-arg constructor
+        val source = """
+            public class ClsTarget {
+                public ClsTarget() {}
+                public String hello() {
+                    return "from-class";
+                }
+            }
+        """.trimIndent()
+
+        val result = compileAndInvoke(source, "ClsTarget", "hello", ContainerKind.CLASS)
+        assertEquals("from-class", result)
+    }
+
+    @Test
+    fun throwsForClassWithNoNoArgConstructor() {
+        val source = """
+            public class NoDefaultCtor {
+                public NoDefaultCtor(int x) {}
+                public String hello() { return "hi"; }
+            }
+        """.trimIndent()
+
+        assertFailsWith<NoSuchMethodException> {
+            compileAndInvoke(source, "NoDefaultCtor", "hello", ContainerKind.CLASS)
+        }
+    }
+
+    @Test
+    fun throwsForObjectWithNoInstanceField() {
+        val source = """
+            public class NoInstance {
+                public String hello() { return "hi"; }
+            }
+        """.trimIndent()
+
+        assertFailsWith<NoSuchFieldException> {
+            compileAndInvoke(source, "NoInstance", "hello", ContainerKind.OBJECT)
+        }
     }
 }

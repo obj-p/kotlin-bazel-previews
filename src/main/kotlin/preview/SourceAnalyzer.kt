@@ -7,14 +7,20 @@ import org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
 import org.jetbrains.kotlin.psi.KtPsiFactory
+
+enum class ContainerKind { TOP_LEVEL, OBJECT, CLASS }
 
 data class FunctionInfo(
     val name: String,
     val packageName: String,
     val jvmClassName: String,
+    val containerKind: ContainerKind = ContainerKind.TOP_LEVEL,
 )
 
 class SourceAnalyzer : Closeable {
@@ -28,36 +34,111 @@ class SourceAnalyzer : Closeable {
         ).project
     }
 
-    fun findTopLevelFunctions(filePath: String): List<FunctionInfo> {
+    fun findPreviewFunctions(filePath: String): List<FunctionInfo> {
         check(!disposed) { "SourceAnalyzer has been closed" }
         val file = File(filePath)
-        return findTopLevelFunctionsFromContent(file.readText(), file.name)
+        return findPreviewFunctionsFromContent(file.readText(), file.name)
     }
 
-    fun findTopLevelFunctionsFromContent(content: String, fileName: String): List<FunctionInfo> {
+    fun findPreviewFunctionsFromContent(content: String, fileName: String): List<FunctionInfo> {
         check(!disposed) { "SourceAnalyzer has been closed" }
         val ktFile = KtPsiFactory(psiProject, markGenerated = false).createFile(fileName, content)
         val packageName = ktFile.packageFqName.asString()
         val jvmClassName = deriveJvmClassName(ktFile, fileName, packageName)
 
-        return ktFile.declarations
+        val results = mutableListOf<FunctionInfo>()
+
+        // Top-level functions
+        ktFile.declarations
             .filterIsInstance<KtNamedFunction>()
-            .filter { fn ->
-                fn.annotationEntries.any { it.shortName?.asString() == "Preview" } &&
-                    !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
-                    !fn.hasModifier(KtTokens.SUSPEND_KEYWORD) &&
-                    // Exclude functions with any declared parameters (including those with
-                    // defaults) — PreviewRunner uses Class.getMethod(name) which only
-                    // matches the zero-arg JVM signature.
-                    fn.valueParameters.isEmpty() &&
-                    fn.receiverTypeReference == null &&
-                    fn.typeParameters.isEmpty()
-            }
-            .mapNotNull { fn ->
+            .filter { isPreviewCandidate(it) }
+            .mapNotNullTo(results) { fn ->
                 fn.name?.let { name ->
-                    FunctionInfo(name = name, packageName = packageName, jvmClassName = jvmClassName)
+                    FunctionInfo(
+                        name = name,
+                        packageName = packageName,
+                        jvmClassName = jvmClassName,
+                        containerKind = ContainerKind.TOP_LEVEL,
+                    )
                 }
             }
+
+        // Top-level classes and objects
+        for (classOrObject in ktFile.declarations.filterIsInstance<KtClassOrObject>()) {
+            collectFromContainer(classOrObject, packageName, results)
+        }
+
+        return results
+    }
+
+    private fun collectFromContainer(
+        classOrObject: KtClassOrObject,
+        packageName: String,
+        results: MutableList<FunctionInfo>,
+    ) {
+        val containerKind = containerKindOf(classOrObject) ?: return
+        val containerJvmClassName = deriveContainerJvmClassName(classOrObject, packageName)
+
+        // Functions directly in this container
+        classOrObject.body?.declarations
+            ?.filterIsInstance<KtNamedFunction>()
+            ?.filter { isPreviewCandidate(it) }
+            ?.mapNotNullTo(results) { fn ->
+                fn.name?.let { name ->
+                    FunctionInfo(
+                        name = name,
+                        packageName = packageName,
+                        jvmClassName = containerJvmClassName,
+                        containerKind = containerKind,
+                    )
+                }
+            }
+
+        // One level deeper: companion objects and nested objects inside classes
+        classOrObject.body?.declarations
+            ?.filterIsInstance<KtClassOrObject>()
+            ?.forEach { nested -> collectFromContainer(nested, packageName, results) }
+    }
+
+    private fun containerKindOf(classOrObject: KtClassOrObject): ContainerKind? {
+        return when {
+            classOrObject is KtObjectDeclaration -> ContainerKind.OBJECT
+            classOrObject is KtClass && !classOrObject.isInterface() &&
+                !classOrObject.isEnum() &&
+                !classOrObject.hasModifier(KtTokens.INNER_KEYWORD) &&
+                !classOrObject.hasModifier(KtTokens.ABSTRACT_KEYWORD) -> ContainerKind.CLASS
+            else -> null // interfaces, enums, inner classes — skip
+        }
+    }
+
+    private fun isPreviewCandidate(fn: KtNamedFunction): Boolean {
+        return fn.annotationEntries.any { it.shortName?.asString() == "Preview" } &&
+            !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
+            !fn.hasModifier(KtTokens.SUSPEND_KEYWORD) &&
+            !fn.hasModifier(KtTokens.ABSTRACT_KEYWORD) &&
+            fn.valueParameters.isEmpty() &&
+            fn.receiverTypeReference == null &&
+            fn.typeParameters.isEmpty()
+    }
+
+    private fun deriveContainerJvmClassName(
+        classOrObject: KtClassOrObject,
+        packageName: String,
+    ): String {
+        val segments = mutableListOf<String>()
+        var current: KtClassOrObject? = classOrObject
+        while (current != null) {
+            val name = if (current is KtObjectDeclaration && current.isCompanion() && current.name == null) {
+                "Companion"
+            } else {
+                current.name ?: "Companion"
+            }
+            segments.add(0, name)
+            val parent = current.parent?.parent // KtClassBody -> KtClassOrObject
+            current = parent as? KtClassOrObject
+        }
+        val nested = segments.joinToString("$")
+        return if (packageName.isEmpty()) nested else "$packageName.$nested"
     }
 
     // Handles standard string literal arguments only (e.g. @file:JvmName("Name")).

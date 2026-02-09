@@ -115,7 +115,7 @@ class PreviewServer(
     }
 
     private fun renderPreview(usePatchDir: Boolean = false) {
-        val functions = analyzer.findTopLevelFunctions(sourceFile.absolutePath)
+        val functions = analyzer.findPreviewFunctions(sourceFile.absolutePath)
         val invoker: (FunctionInfo) -> String? = { fn ->
             if (usePatchDir) invokeFastPath(fn) else PreviewRunner.invoke(cachedClasspath, fn)
         }

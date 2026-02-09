@@ -33,11 +33,12 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
         assertEquals("myapp", result[0].packageName)
         assertEquals("myapp.GreeterKt", result[0].jvmClassName)
+        assertEquals(ContainerKind.TOP_LEVEL, result[0].containerKind)
     }
 
     @Test
@@ -49,7 +50,7 @@ class SourceAnalyzerTest {
             |internal fun foo(): String = "foo"
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Utils.kt")
         assertEquals(1, result.size)
         assertEquals("foo", result[0].name)
         assertEquals("myapp.UtilsKt", result[0].jvmClassName)
@@ -64,7 +65,7 @@ class SourceAnalyzerTest {
             |suspend fun bar() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Utils.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Utils.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -77,7 +78,7 @@ class SourceAnalyzerTest {
             |private fun secret() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Secret.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Secret.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -96,7 +97,8 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
+        // Now we only get the top-level preview (greet has a parameter, no @Preview)
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -111,7 +113,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -125,7 +127,7 @@ class SourceAnalyzerTest {
             |fun doSomething() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "App.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "App.kt")
         assertEquals("com.example.app", result[0].packageName)
         assertEquals("com.example.app.AppKt", result[0].jvmClassName)
     }
@@ -137,7 +139,7 @@ class SourceAnalyzerTest {
             |fun topLevel() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Script.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Script.kt")
         assertEquals(1, result.size)
         assertEquals("", result[0].packageName)
         assertEquals("ScriptKt", result[0].jvmClassName)
@@ -153,7 +155,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -167,7 +169,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Ext.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Ext.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -182,7 +184,7 @@ class SourceAnalyzerTest {
             |fun preview() = "ok"
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Generic.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Generic.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -200,7 +202,7 @@ class SourceAnalyzerTest {
             |fun third() = 3
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Multi.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Multi.kt")
         assertEquals(3, result.size)
         assertEquals("first", result[0].name)
         assertEquals("second", result[1].name)
@@ -216,7 +218,7 @@ class SourceAnalyzerTest {
             |inline fun fast() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Inline.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Inline.kt")
         assertEquals(1, result.size)
         assertEquals("fast", result[0].name)
     }
@@ -231,7 +233,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
         assertEquals("myapp", result[0].packageName)
@@ -247,7 +249,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("Custom", result[0].jvmClassName)
     }
@@ -262,7 +264,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -275,7 +277,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -290,7 +292,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -305,7 +307,7 @@ class SourceAnalyzerTest {
             |fun bar() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Params.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Params.kt")
         assertEquals(1, result.size)
         assertEquals("bar", result[0].name)
     }
@@ -322,7 +324,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Foo.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Foo.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -336,7 +338,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "I.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "I.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -351,7 +353,7 @@ class SourceAnalyzerTest {
             |}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "E.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "E.kt")
         assertTrue(result.isEmpty())
     }
 
@@ -365,7 +367,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("myapp.Custom", result[0].jvmClassName)
     }
@@ -381,19 +383,19 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Greeter.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Greeter.kt")
         assertEquals(1, result.size)
         assertEquals("myapp.Custom", result[0].jvmClassName)
     }
 
     @Test
     fun handlesEmptyFile() {
-        val result = analyzer.findTopLevelFunctionsFromContent("", "Empty.kt")
+        val result = analyzer.findPreviewFunctionsFromContent("", "Empty.kt")
         assertTrue(result.isEmpty())
     }
 
     @Test
-    fun findTopLevelFunctions_readsFromFile() {
+    fun findPreviewFunctions_readsFromFile() {
         val file = tmpDir.newFile("Sample.kt")
         file.writeText("""
             |package sample
@@ -402,7 +404,7 @@ class SourceAnalyzerTest {
             |fun greet() = "hi"
         """.trimMargin())
 
-        val result = analyzer.findTopLevelFunctions(file.absolutePath)
+        val result = analyzer.findPreviewFunctions(file.absolutePath)
         assertEquals(1, result.size)
         assertEquals("greet", result[0].name)
         assertEquals("sample", result[0].packageName)
@@ -420,7 +422,7 @@ class SourceAnalyzerTest {
             |fun preview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Mix.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Mix.kt")
         assertEquals(1, result.size)
         assertEquals("preview", result[0].name)
     }
@@ -434,7 +436,7 @@ class SourceAnalyzerTest {
             |fun darkPreview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("darkPreview", result[0].name)
     }
@@ -447,8 +449,218 @@ class SourceAnalyzerTest {
             |@Preview fun inlinePreview() {}
         """.trimMargin()
 
-        val result = analyzer.findTopLevelFunctionsFromContent(content, "Preview.kt")
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Preview.kt")
         assertEquals(1, result.size)
         assertEquals("inlinePreview", result[0].name)
+    }
+
+    // --- New tests for nested container support ---
+
+    @Test
+    fun findsPreviewFunctionInObject() {
+        val content = """
+            |package pkg
+            |
+            |object Previews {
+            |    @Preview
+            |    fun objectPreview() = "from object"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Previews.kt")
+        assertEquals(1, result.size)
+        assertEquals("objectPreview", result[0].name)
+        assertEquals("pkg", result[0].packageName)
+        assertEquals("pkg.Previews", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+    }
+
+    @Test
+    fun findsPreviewFunctionInClass() {
+        val content = """
+            |package pkg
+            |
+            |class MyPreviews {
+            |    @Preview
+            |    fun classPreview() = "from class"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "MyPreviews.kt")
+        assertEquals(1, result.size)
+        assertEquals("classPreview", result[0].name)
+        assertEquals("pkg", result[0].packageName)
+        assertEquals("pkg.MyPreviews", result[0].jvmClassName)
+        assertEquals(ContainerKind.CLASS, result[0].containerKind)
+    }
+
+    @Test
+    fun findsPreviewFunctionInCompanionObject() {
+        val content = """
+            |package pkg
+            |
+            |class Host {
+            |    companion object {
+            |        @Preview
+            |        fun companionPreview() = "from companion"
+            |    }
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Host.kt")
+        assertEquals(1, result.size)
+        assertEquals("companionPreview", result[0].name)
+        assertEquals("pkg.Host\$Companion", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+    }
+
+    @Test
+    fun findsPreviewFunctionInNamedCompanionObject() {
+        val content = """
+            |package pkg
+            |
+            |class Host {
+            |    companion object Factory {
+            |        @Preview
+            |        fun factoryPreview() = "from factory"
+            |    }
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Host.kt")
+        assertEquals(1, result.size)
+        assertEquals("factoryPreview", result[0].name)
+        assertEquals("pkg.Host\$Factory", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+    }
+
+    @Test
+    fun findsPreviewFunctionInNestedObject() {
+        val content = """
+            |package pkg
+            |
+            |class Outer {
+            |    object Inner {
+            |        @Preview
+            |        fun innerPreview() = "from inner"
+            |    }
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Outer.kt")
+        assertEquals(1, result.size)
+        assertEquals("innerPreview", result[0].name)
+        assertEquals("pkg.Outer\$Inner", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+    }
+
+    @Test
+    fun findsMixOfTopLevelAndNestedPreviewFunctions() {
+        val content = """
+            |package pkg
+            |
+            |@Preview
+            |fun topLevel() = "top"
+            |
+            |object Obj {
+            |    @Preview
+            |    fun objPreview() = "obj"
+            |}
+            |
+            |class Cls {
+            |    @Preview
+            |    fun clsPreview() = "cls"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Mix.kt")
+        assertEquals(3, result.size)
+        assertEquals("topLevel", result[0].name)
+        assertEquals(ContainerKind.TOP_LEVEL, result[0].containerKind)
+        assertEquals("pkg.MixKt", result[0].jvmClassName)
+        assertEquals("objPreview", result[1].name)
+        assertEquals(ContainerKind.OBJECT, result[1].containerKind)
+        assertEquals("pkg.Obj", result[1].jvmClassName)
+        assertEquals("clsPreview", result[2].name)
+        assertEquals(ContainerKind.CLASS, result[2].containerKind)
+        assertEquals("pkg.Cls", result[2].jvmClassName)
+    }
+
+    @Test
+    fun ignoresPreviewInInterface() {
+        val content = """
+            |package pkg
+            |
+            |interface Iface {
+            |    @Preview
+            |    fun ifacePreview() {}
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Iface.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun ignoresPreviewInEnum() {
+        val content = """
+            |package pkg
+            |
+            |enum class MyEnum {
+            |    A;
+            |    @Preview
+            |    fun enumPreview() = "enum"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "MyEnum.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun ignoresPrivatePreviewInObject() {
+        val content = """
+            |package pkg
+            |
+            |object Previews {
+            |    @Preview
+            |    private fun secret() = "hidden"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Previews.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun ignoresPreviewInAbstractClass() {
+        val content = """
+            |package pkg
+            |
+            |abstract class Base {
+            |    @Preview
+            |    fun basePreview() = "base"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Base.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun findsPreviewInObjectWithDefaultPackage() {
+        val content = """
+            |object Previews {
+            |    @Preview
+            |    fun noPackage() = "default"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Previews.kt")
+        assertEquals(1, result.size)
+        assertEquals("noPackage", result[0].name)
+        assertEquals("", result[0].packageName)
+        assertEquals("Previews", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
     }
 }

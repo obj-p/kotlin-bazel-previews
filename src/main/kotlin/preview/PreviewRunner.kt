@@ -14,7 +14,8 @@ object PreviewRunner {
         return try {
             val clazz = loader.loadClass(fn.jvmClassName)
             val method = clazz.getMethod(fn.name)
-            val result = method.invoke(null)
+            val receiver = resolveReceiver(clazz, fn.containerKind)
+            val result = method.invoke(receiver)
             result?.toString()
         } catch (e: InvocationTargetException) {
             throw e.cause ?: e
@@ -22,4 +23,11 @@ object PreviewRunner {
             loader.close()
         }
     }
+
+    private fun resolveReceiver(clazz: Class<*>, kind: ContainerKind): Any? =
+        when (kind) {
+            ContainerKind.TOP_LEVEL -> null
+            ContainerKind.OBJECT -> clazz.getDeclaredField("INSTANCE").get(null)
+            ContainerKind.CLASS -> clazz.getDeclaredConstructor().newInstance()
+        }
 }

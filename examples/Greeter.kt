@@ -6,6 +6,11 @@ object Greeter {
     fun greet(name: String): String {
         return "Hello, $name!"
     }
+
+    @Preview
+    fun greetDefault(): String {
+        return greet("Default")
+    }
 }
 
 @Preview
