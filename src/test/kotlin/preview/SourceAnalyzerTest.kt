@@ -750,7 +750,7 @@ class SourceAnalyzerTest {
     }
 
     @Test
-    fun rejectsMultipleParameters() {
+    fun acceptsMultipleParameters() {
         val content = """
             |package examples
             |import preview.annotations.PreviewParameter
@@ -763,7 +763,11 @@ class SourceAnalyzerTest {
         """.trimMargin()
 
         val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
-        assertTrue(result.isEmpty())
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+        assertEquals(2, result[0].parameters.size)
+        assertEquals("user", result[0].parameters[0].name)
+        assertEquals("theme", result[0].parameters[1].name)
     }
 
     @Test

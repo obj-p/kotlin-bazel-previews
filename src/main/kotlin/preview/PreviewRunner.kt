@@ -23,6 +23,23 @@ data class PreviewResult(
 }
 
 object PreviewRunner {
+    /**
+     * Internal: Materialized provider with values and display name access.
+     */
+    private data class MaterializedProvider(
+        val paramInfo: ParameterInfo,
+        val values: List<Any?>,
+        val providerInstance: ProviderInstance
+    )
+
+    /**
+     * Internal: A combination of parameter values with their original indices.
+     */
+    private data class IndexedCombination(
+        val values: List<Any?>,
+        val indices: List<Int>
+    )
+
     fun invoke(classpathJars: List<String>, fn: FunctionInfo): List<PreviewResult> {
         val urls = classpathJars.map { File(it).toURI().toURL() }.toTypedArray()
         return invoke(URLClassLoader(urls, ClassLoader.getPlatformClassLoader()), fn)
@@ -48,51 +65,77 @@ object PreviewRunner {
             }
         }
 
-        // Parameterized path: instantiate provider and iterate values
-        val paramInfo = fn.parameters[0]  // Phase 1: single parameter only
+        // Phase 3: Multi-parameter support with cartesian product
 
-        val provider = try {
-            instantiateProvider(loader, paramInfo)
-        } catch (e: Exception) {
+        // Step 1: Instantiate all providers
+        val materializedProviders = mutableListOf<MaterializedProvider>()
+        for (paramInfo in fn.parameters) {
+            val provider = try {
+                instantiateProvider(loader, paramInfo)
+            } catch (e: Exception) {
+                return listOf(
+                    PreviewResult(
+                        fn.name,
+                        null,
+                        error = "Failed to instantiate provider ${paramInfo.providerClass}: ${e.message}"
+                    )
+                )
+            }
+
+            // Materialize values with hard limit of 100 per provider
+            val values = provider.values.take(100).toList()
+
+            // Empty provider check
+            if (values.isEmpty()) {
+                return listOf(
+                    PreviewResult(
+                        fn.name,
+                        null,
+                        error = "Provider ${paramInfo.providerClass} returned no values"
+                    )
+                )
+            }
+
+            materializedProviders.add(MaterializedProvider(paramInfo, values, provider))
+        }
+
+        // Step 2: Calculate total combinations
+        val sizes = materializedProviders.map { it.values.size }
+        val totalCombinations = sizes.fold(1L) { acc, size -> acc * size }
+
+        // Step 3: Check limits
+        if (totalCombinations > 100) {
+            val calculation = sizes.joinToString(" × ")
             return listOf(
                 PreviewResult(
                     fn.name,
                     null,
-                    error = "Failed to instantiate provider ${paramInfo.providerClass}: ${e.message}"
+                    error = "Too many parameter combinations: $calculation = $totalCombinations (limit: 100)"
                 )
             )
         }
 
-        // Materialize values with hard limit of 100
-        val values = provider.values.take(100).toList()
-
-        // Warn if >20 results
-        if (values.size > 20) {
+        // Soft warning for >20 combinations
+        if (totalCombinations > 20) {
+            val calculation = sizes.joinToString(" × ")
             System.err.println(
-                "[Preview] Warning: ${fn.name} generates ${values.size} previews (>20). " +
-                "Consider reducing provider size."
+                "[Preview] Warning: ${fn.name} generates $totalCombinations previews ($calculation, limit: 100). " +
+                "Consider reducing provider sizes."
             )
         }
 
-        // Empty provider check
-        if (values.isEmpty()) {
-            return listOf(
-                PreviewResult(
-                    fn.name,
-                    null,
-                    error = "Provider ${paramInfo.providerClass} returned no values"
-                )
-            )
-        }
+        // Step 4: Generate cartesian product
+        val valueSequences = materializedProviders.map { it.values.asSequence() }
+        val combinations = cartesianProductWithIndices(valueSequences)
 
-        // Invoke once per value
+        // Step 5: Invoke once per combination
         val results = mutableListOf<PreviewResult>()
-        values.forEachIndexed { index, value ->
-            // Build display name: try custom, fall back to index
-            val displayName = buildDisplayName(provider, index)
+        combinations.forEach { combo ->
+            // Build multi-parameter display name
+            val displayName = buildMultiParameterDisplayName(materializedProviders, combo.indices)
 
             try {
-                val result = invokeSingle(loader, fn, listOf(value))
+                val result = invokeSingle(loader, fn, combo.values)
                 results.add(PreviewResult(fn.name, displayName, result = result))
             } catch (e: Exception) {
                 val error = if (e is InvocationTargetException) {
@@ -218,6 +261,86 @@ object PreviewRunner {
         } else {
             "[$index]"  // Fall back to index
         }
+    }
+
+    /**
+     * Generate cartesian product of multiple sequences, tracking original indices.
+     *
+     * For input sequences [[a, b], [x, y]], generates:
+     * - IndexedCombination(values=[a, x], indices=[0, 0])
+     * - IndexedCombination(values=[a, y], indices=[0, 1])
+     * - IndexedCombination(values=[b, x], indices=[1, 0])
+     * - IndexedCombination(values=[b, y], indices=[1, 1])
+     *
+     * @param sequences List of sequences to combine
+     * @return Sequence of all combinations with their indices
+     */
+    private fun cartesianProductWithIndices(
+        sequences: List<Sequence<Any?>>
+    ): Sequence<IndexedCombination> {
+        if (sequences.isEmpty()) {
+            return sequenceOf(IndexedCombination(emptyList(), emptyList()))
+        }
+
+        if (sequences.size == 1) {
+            return sequences[0].mapIndexed { index, value ->
+                IndexedCombination(listOf(value), listOf(index))
+            }
+        }
+
+        // Recursive case: cartesian product of first sequence with rest
+        val first = sequences[0]
+        val rest = cartesianProductWithIndices(sequences.drop(1))
+
+        return sequence {
+            first.forEachIndexed { index, value ->
+                rest.forEach { restCombo ->
+                    yield(
+                        IndexedCombination(
+                            values = listOf(value) + restCombo.values,
+                            indices = listOf(index) + restCombo.indices
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Build multi-parameter display name for a preview result.
+     *
+     * Format:
+     * - Single param: "[name]" or "[index]"
+     * - Multiple params: "[name1, name2, ...]" or "[index1, index2, ...]"
+     *
+     * @param providers List of materialized providers
+     * @param indices Index of each value in its provider
+     * @return Display name string (never null)
+     */
+    private fun buildMultiParameterDisplayName(
+        providers: List<MaterializedProvider>,
+        indices: List<Int>
+    ): String {
+        require(providers.size == indices.size) {
+            "Provider count (${providers.size}) must match index count (${indices.size})"
+        }
+
+        // Single parameter: backward compatible format
+        if (providers.size == 1) {
+            return buildDisplayName(providers[0].providerInstance, indices[0])
+        }
+
+        // Multiple parameters: "[name1, name2, ...]"
+        val names = providers.zip(indices).map { (provider, index) ->
+            val customName = provider.providerInstance.getDisplayName(index)
+            if (customName != null && customName.isNotBlank()) {
+                customName
+            } else {
+                index.toString()
+            }
+        }
+
+        return "[${names.joinToString(", ")}]"
     }
 
     /**

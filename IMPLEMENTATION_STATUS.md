@@ -340,6 +340,96 @@ class UserProvider : PreviewParameterProvider<User> {
 
 ---
 
+## Phase 3: Multi-Parameter Support (COMPLETE ✅)
+
+Add support for multiple `@PreviewParameter` annotations on a single preview function, generating the cartesian product of all parameter values.
+
+### What's Done:
+- [x] Removed single-parameter restriction in SourceAnalyzer
+- [x] Added MaterializedProvider and IndexedCombination data classes
+- [x] Rewrote invokeWithLoader() to handle multiple parameters with cartesian product
+- [x] Added cartesianProductWithIndices() helper function
+- [x] Added buildMultiParameterDisplayName() helper function
+- [x] Added 11 comprehensive test cases
+- [x] Created MultiParameterPreview.kt example file
+- [x] All 129 tests passing (118 existing + 11 new)
+
+### Features:
+- **Multi-Parameter**: Supports 2+ @PreviewParameter annotations per function
+- **Cartesian Product**: Generates all combinations of parameter values
+- **Display Names**: Format is `[name1, name2, ...]` for multiple parameters
+- **Limits**: Hard limit of 100 total combinations, soft warning at 20
+- **Backward Compatible**: Single-parameter functions still work with same format
+- **Error Handling**: Comprehensive error messages for limit exceeded, empty providers, etc.
+
+### Example:
+```kotlin
+@Preview
+fun textCard(
+    @PreviewParameter(UserProvider::class) user: User,
+    @PreviewParameter(ThemeProvider::class) theme: Theme
+): String {
+    return "Card for ${user.name} in ${theme.name} theme"
+}
+
+// UserProvider has 3 values: Alice, Bob, Charlie
+// ThemeProvider has 2 values: Light, Dark
+// Generates 3 × 2 = 6 previews:
+// - textCard[Alice, Light]
+// - textCard[Alice, Dark]
+// - textCard[Bob, Light]
+// - textCard[Bob, Dark]
+// - textCard[Charlie, Light]
+// - textCard[Charlie, Dark]
+```
+
+### Files Modified:
+- Modified: `src/main/kotlin/preview/SourceAnalyzer.kt`
+  - Changed hasValidParameters() to accept multiple parameters (all must have @PreviewParameter)
+- Modified: `src/main/kotlin/preview/PreviewRunner.kt`
+  - Added MaterializedProvider and IndexedCombination data classes
+  - Rewrote invokeWithLoader() for multi-parameter support
+  - Added cartesianProductWithIndices() for generating combinations
+  - Added buildMultiParameterDisplayName() for formatting display names
+- Modified: `src/test/kotlin/preview/PreviewRunnerTest.kt`
+  - Added 11 new test cases for Phase 3 multi-parameter support
+- Created: `examples/MultiParameterPreview.kt`
+  - Comprehensive example demonstrating 2 and 3 parameter usage
+
+### Test Coverage:
+1. ✅ Two parameters basic case (2×2=4 combinations)
+2. ✅ Three parameters (2×2×2=8 combinations)
+3. ✅ Exactly at 100 limit (10×10=100 succeeds)
+4. ✅ Exceeds 100 limit (10×11=110 returns error with calculation)
+5. ✅ Soft warning at 20 (5×5=25 logs to stderr)
+6. ✅ All custom display names
+7. ✅ Mixed custom/index names
+8. ✅ First provider fails to instantiate
+9. ✅ Second provider returns empty
+10. ✅ Individual invocation failure
+11. ✅ Backward compatibility with single parameter
+
+### Edge Cases Handled:
+| Case | Behavior | Status |
+|------|----------|--------|
+| Zero parameters | Single result, no display name | ✅ Existing |
+| Single parameter | Format `[name]` or `[index]` | ✅ Backward compat |
+| Two parameters | Format `[name1, name2]` | ✅ Tested |
+| Three+ parameters | Format `[n1, n2, n3, ...]` | ✅ Tested |
+| Exactly 100 combinations | All generated | ✅ Tested |
+| > 100 combinations | Error with calculation shown | ✅ Tested |
+| > 20 combinations | Warning to stderr | ✅ Tested |
+| Provider instantiation fails | Single error result | ✅ Tested |
+| Provider returns empty | Error with provider name | ✅ Tested |
+| Individual invocation fails | Error for that combo only | ✅ Tested |
+| Mixed custom/index names | Format `[custom, 0, ...]` | ✅ Tested |
+
+**Build Status**: ✅ All tests pass (129/129 total)
+
+**Deliverable**: ✅ Multi-parameter support with cartesian product generation
+
+---
+
 ## How to Continue
 
 ### For Next Agent/Session:

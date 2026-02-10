@@ -572,7 +572,7 @@ class PreviewRunnerTest {
             val errOutput = errCapture.toString()
             assertTrue(errOutput.contains("Warning"))
             assertTrue(errOutput.contains("25 previews"))
-            assertTrue(errOutput.contains(">20"))
+            assertTrue(errOutput.contains("limit: 100"))
         } finally {
             System.setErr(originalErr)
         }
@@ -1032,5 +1032,458 @@ class PreviewRunnerTest {
         assertEquals(2, results.size)
         assertEquals("preview[Greek-1]", results[0].fullDisplayName)
         assertEquals("preview[Greek-2]", results[1].fullDisplayName)
+    }
+
+    // ============================================================
+    // Phase 3: Multi-Parameter Support Tests
+    // ============================================================
+
+    @Test
+    fun twoParametersBasicCase() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class UserProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Alice", "Bob")
+                    }
+
+                    class ThemeProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Light", "Dark")
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun textCard(user: String, theme: String): String {
+                        return "Card for ${'$'}user in ${'$'}theme theme"
+                    }
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "textCard",
+            parameters = listOf(
+                ParameterInfo("user", "String", "UserProvider"),
+                ParameterInfo("theme", "String", "ThemeProvider")
+            )
+        )
+
+        // Should generate 2 × 2 = 4 combinations
+        assertEquals(4, results.size)
+        assertEquals("textCard[0, 0]", results[0].fullDisplayName)
+        assertEquals("Card for Alice in Light theme", results[0].result)
+        assertEquals("textCard[0, 1]", results[1].fullDisplayName)
+        assertEquals("Card for Alice in Dark theme", results[1].result)
+        assertEquals("textCard[1, 0]", results[2].fullDisplayName)
+        assertEquals("Card for Bob in Light theme", results[2].result)
+        assertEquals("textCard[1, 1]", results[3].fullDisplayName)
+        assertEquals("Card for Bob in Dark theme", results[3].result)
+    }
+
+    @Test
+    fun threeParameters() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class ColorProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Red", "Blue")
+                    }
+
+                    class SizeProvider : PreviewParameterProvider<Int> {
+                        override val values = sequenceOf(10, 20)
+                    }
+
+                    class StyleProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Bold", "Italic")
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun styledText(color: String, size: Int, style: String): String {
+                        return "${'$'}color text at ${'$'}{size}pt in ${'$'}style"
+                    }
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "styledText",
+            parameters = listOf(
+                ParameterInfo("color", "String", "ColorProvider"),
+                ParameterInfo("size", "Int", "SizeProvider"),
+                ParameterInfo("style", "String", "StyleProvider")
+            )
+        )
+
+        // Should generate 2 × 2 × 2 = 8 combinations
+        assertEquals(8, results.size)
+        assertEquals("styledText[0, 0, 0]", results[0].fullDisplayName)
+        assertEquals("Red text at 10pt in Bold", results[0].result)
+        assertEquals("styledText[0, 0, 1]", results[1].fullDisplayName)
+        assertEquals("Red text at 10pt in Italic", results[1].result)
+        assertEquals("styledText[0, 1, 0]", results[2].fullDisplayName)
+        assertEquals("Red text at 20pt in Bold", results[2].result)
+        assertEquals("styledText[0, 1, 1]", results[3].fullDisplayName)
+        assertEquals("Red text at 20pt in Italic", results[3].result)
+        assertEquals("styledText[1, 0, 0]", results[4].fullDisplayName)
+        assertEquals("Blue text at 10pt in Bold", results[4].result)
+        assertEquals("styledText[1, 0, 1]", results[5].fullDisplayName)
+        assertEquals("Blue text at 10pt in Italic", results[5].result)
+        assertEquals("styledText[1, 1, 0]", results[6].fullDisplayName)
+        assertEquals("Blue text at 20pt in Bold", results[6].result)
+        assertEquals("styledText[1, 1, 1]", results[7].fullDisplayName)
+        assertEquals("Blue text at 20pt in Italic", results[7].result)
+    }
+
+    @Test
+    fun exactlyAt100Limit() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class TenProvider : PreviewParameterProvider<Int> {
+                        override val values = (0..9).asSequence()
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: Int, b: Int): String = "${'$'}a,${'$'}b"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "Int", "TenProvider"),
+                ParameterInfo("b", "Int", "TenProvider")
+            )
+        )
+
+        // Should generate exactly 10 × 10 = 100 combinations
+        assertEquals(100, results.size)
+        assertEquals("combine[0, 0]", results[0].fullDisplayName)
+        assertEquals("0,0", results[0].result)
+        assertEquals("combine[9, 9]", results[99].fullDisplayName)
+        assertEquals("9,9", results[99].result)
+    }
+
+    @Test
+    fun exceeds100Limit() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class TenProvider : PreviewParameterProvider<Int> {
+                        override val values = (0..9).asSequence()
+                    }
+
+                    class ElevenProvider : PreviewParameterProvider<Int> {
+                        override val values = (0..10).asSequence()
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: Int, b: Int): String = "${'$'}a,${'$'}b"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "Int", "TenProvider"),
+                ParameterInfo("b", "Int", "ElevenProvider")
+            )
+        )
+
+        // Should return error: 10 × 11 = 110 > 100
+        assertEquals(1, results.size)
+        assertNull(results[0].result)
+        assertTrue(results[0].error!!.contains("Too many parameter combinations"))
+        assertTrue(results[0].error!!.contains("10 × 11 = 110"))
+        assertTrue(results[0].error!!.contains("limit: 100"))
+    }
+
+    @Test
+    fun softWarningAt20() {
+        val originalErr = System.err
+        val errCapture = java.io.ByteArrayOutputStream()
+        try {
+            System.setErr(java.io.PrintStream(errCapture))
+
+            val results = compileKotlinAndInvokeList(
+                mapOf(
+                    "Providers.kt" to """
+                        import preview.annotations.PreviewParameterProvider
+
+                        class FiveProvider : PreviewParameterProvider<Int> {
+                            override val values = (0..4).asSequence()
+                        }
+                    """.trimIndent(),
+                    "Preview.kt" to """
+                        fun combine(a: Int, b: Int): String = "${'$'}a,${'$'}b"
+                    """.trimIndent()
+                ),
+                className = "PreviewKt",
+                methodName = "combine",
+                parameters = listOf(
+                    ParameterInfo("a", "Int", "FiveProvider"),
+                    ParameterInfo("b", "Int", "FiveProvider")
+                )
+            )
+
+            // Should generate 5 × 5 = 25 combinations with warning
+            assertEquals(25, results.size)
+
+            val errOutput = errCapture.toString()
+            assertTrue(errOutput.contains("Warning"))
+            assertTrue(errOutput.contains("5 × 5"))
+            assertTrue(errOutput.contains("25 previews"))
+        } finally {
+            System.setErr(originalErr)
+        }
+    }
+
+    @Test
+    fun allCustomDisplayNames() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class UserProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Alice", "Bob")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("User1", "User2").getOrNull(index)
+                        }
+                    }
+
+                    class ThemeProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Light", "Dark")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("Day", "Night").getOrNull(index)
+                        }
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun textCard(user: String, theme: String): String {
+                        return "${'$'}user in ${'$'}theme"
+                    }
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "textCard",
+            parameters = listOf(
+                ParameterInfo("user", "String", "UserProvider"),
+                ParameterInfo("theme", "String", "ThemeProvider")
+            )
+        )
+
+        assertEquals(4, results.size)
+        assertEquals("textCard[User1, Day]", results[0].fullDisplayName)
+        assertEquals("textCard[User1, Night]", results[1].fullDisplayName)
+        assertEquals("textCard[User2, Day]", results[2].fullDisplayName)
+        assertEquals("textCard[User2, Night]", results[3].fullDisplayName)
+    }
+
+    @Test
+    fun mixedCustomAndIndexNames() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class NamedProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("A", "B")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("First", "Second").getOrNull(index)
+                        }
+                    }
+
+                    class IndexedProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("X", "Y")
+                        // No getDisplayName - uses indices
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: String, b: String): String = "${'$'}a${'$'}b"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "String", "NamedProvider"),
+                ParameterInfo("b", "String", "IndexedProvider")
+            )
+        )
+
+        assertEquals(4, results.size)
+        assertEquals("combine[First, 0]", results[0].fullDisplayName)
+        assertEquals("combine[First, 1]", results[1].fullDisplayName)
+        assertEquals("combine[Second, 0]", results[2].fullDisplayName)
+        assertEquals("combine[Second, 1]", results[3].fullDisplayName)
+    }
+
+    @Test
+    fun firstProviderFailsToInstantiate() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class BadProvider : PreviewParameterProvider<String> {
+                        init {
+                            throw RuntimeException("Provider initialization failed")
+                        }
+
+                        override val values = sequenceOf("value")
+                    }
+
+                    class GoodProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("value")
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: String, b: String): String = "${'$'}a${'$'}b"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "String", "BadProvider"),
+                ParameterInfo("b", "String", "GoodProvider")
+            )
+        )
+
+        assertEquals(1, results.size)
+        assertNull(results[0].result)
+        assertTrue(results[0].error!!.contains("Failed to instantiate provider"))
+        assertTrue(results[0].error!!.contains("BadProvider"))
+    }
+
+    @Test
+    fun secondProviderReturnsEmpty() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class GoodProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("value")
+                    }
+
+                    class EmptyProvider : PreviewParameterProvider<String> {
+                        override val values = emptySequence<String>()
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: String, b: String): String = "${'$'}a${'$'}b"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "String", "GoodProvider"),
+                ParameterInfo("b", "String", "EmptyProvider")
+            )
+        )
+
+        assertEquals(1, results.size)
+        assertNull(results[0].result)
+        assertTrue(results[0].error!!.contains("returned no values"))
+        assertTrue(results[0].error!!.contains("EmptyProvider"))
+    }
+
+    @Test
+    fun individualInvocationFailure() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class NumberProvider : PreviewParameterProvider<Int> {
+                        override val values = sequenceOf(0, 1, 2)
+                    }
+
+                    class BoolProvider : PreviewParameterProvider<Boolean> {
+                        override val values = sequenceOf(true, false)
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun divide(a: Int, b: Boolean): String {
+                        if (a == 1 && b) {
+                            throw RuntimeException("Intentional error")
+                        }
+                        return "${'$'}a/${'$'}b"
+                    }
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "divide",
+            parameters = listOf(
+                ParameterInfo("a", "Int", "NumberProvider"),
+                ParameterInfo("b", "Boolean", "BoolProvider")
+            )
+        )
+
+        // Should generate 3 × 2 = 6 combinations
+        assertEquals(6, results.size)
+
+        // Combination [1, true] should fail
+        assertEquals("divide[0, 0]", results[0].fullDisplayName)
+        assertEquals("0/true", results[0].result)
+        assertNull(results[0].error)
+
+        assertEquals("divide[0, 1]", results[1].fullDisplayName)
+        assertEquals("0/false", results[1].result)
+        assertNull(results[1].error)
+
+        assertEquals("divide[1, 0]", results[2].fullDisplayName)
+        assertNull(results[2].result)
+        assertTrue(results[2].error!!.contains("Intentional error"))
+
+        assertEquals("divide[1, 1]", results[3].fullDisplayName)
+        assertEquals("1/false", results[3].result)
+        assertNull(results[3].error)
+
+        assertEquals("divide[2, 0]", results[4].fullDisplayName)
+        assertEquals("2/true", results[4].result)
+        assertNull(results[4].error)
+
+        assertEquals("divide[2, 1]", results[5].fullDisplayName)
+        assertEquals("2/false", results[5].result)
+        assertNull(results[5].error)
+    }
+
+    @Test
+    fun backwardCompatibilitySingleParameter() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class SingleProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("Alpha", "Beta")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("First", "Second").getOrNull(index)
+                        }
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun singleParam(value: String): String = "Result: ${'$'}value"
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "singleParam",
+            parameters = listOf(
+                ParameterInfo("value", "String", "SingleProvider")
+            )
+        )
+
+        // Should work exactly as in Phase 2: single bracket format
+        assertEquals(2, results.size)
+        assertEquals("singleParam[First]", results[0].fullDisplayName)
+        assertEquals("Result: Alpha", results[0].result)
+        assertEquals("singleParam[Second]", results[1].fullDisplayName)
+        assertEquals("Result: Beta", results[1].result)
     }
 }

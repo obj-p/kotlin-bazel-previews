@@ -144,8 +144,9 @@ class SourceAnalyzer : Closeable {
     private fun hasValidParameters(fn: KtNamedFunction): Boolean {
         val params = fn.valueParameters
         if (params.isEmpty()) return true  // Legacy: zero params OK
-        if (params.size == 1) return hasPreviewParameterAnnotation(params[0])
-        return false  // Phase 1: reject multiple params
+
+        // Phase 3: All parameters must have @PreviewParameter annotation
+        return params.all { hasPreviewParameterAnnotation(it) }
     }
 
     private fun hasPreviewParameterAnnotation(param: KtParameter): Boolean {
