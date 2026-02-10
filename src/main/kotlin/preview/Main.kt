@@ -57,7 +57,19 @@ private fun runOnce(workspaceRoot: String, filePath: String, sourceFile: File) {
 
     for (fn in functions) {
         println("Invoking ${fn.name}()...")
-        val result = PreviewRunner.invoke(classpath, fn)
-        println("${fn.name}() => $result")
+        val results = PreviewRunner.invoke(classpath, fn)
+
+        if (results.isEmpty()) {
+            println("${fn.name}() => (no results)")
+            continue
+        }
+
+        for (previewResult in results) {
+            if (previewResult.error != null) {
+                println("${previewResult.fullDisplayName} => ERROR: ${previewResult.error}")
+            } else {
+                println("${previewResult.fullDisplayName} => ${previewResult.result}")
+            }
+        }
     }
 }

@@ -116,7 +116,7 @@ class PreviewServer(
 
     private fun renderPreview(usePatchDir: Boolean = false) {
         val functions = analyzer.findPreviewFunctions(sourceFile.absolutePath)
-        val invoker: (FunctionInfo) -> String? = { fn ->
+        val invoker: (FunctionInfo) -> List<PreviewResult> = { fn ->
             if (usePatchDir) invokeFastPath(fn) else PreviewRunner.invoke(cachedClasspath, fn)
         }
         val json = buildJsonOutput(functions, invoker)
@@ -124,7 +124,7 @@ class PreviewServer(
         System.out.flush()
     }
 
-    private fun invokeFastPath(fn: FunctionInfo): String? {
+    private fun invokeFastPath(fn: FunctionInfo): List<PreviewResult> {
         val urls = cachedClasspath.map { File(it).toURI().toURL() }
         return PreviewRunner.invoke(PatchingClassLoader(scratchDir, urls), fn)
     }
@@ -142,20 +142,32 @@ class PreviewServer(
 
 fun buildJsonOutput(
     functions: List<FunctionInfo>,
-    invoker: (FunctionInfo) -> String?,
+    invoker: (FunctionInfo) -> List<PreviewResult>,
 ): String {
-    if (functions.isEmpty()) return "{\"functions\":[]}"
+    if (functions.isEmpty()) return "{\"previews\":[]}"
 
     val results = mutableListOf<String>()
     for (fn in functions) {
         try {
-            val result = invoker(fn)
-            results.add("  {\"name\":${jsonString(fn.name)},\"result\":${jsonString(result)}}")
+            val previewResults = invoker(fn)
+            for (pr in previewResults) {
+                val obj = buildString {
+                    append("  {")
+                    append("\"name\":${jsonString(pr.fullDisplayName)}")
+                    if (pr.error != null) {
+                        append(",\"error\":${jsonString(pr.error)}")
+                    } else {
+                        append(",\"result\":${jsonString(pr.result)}")
+                    }
+                    append("}")
+                }
+                results.add(obj)
+            }
         } catch (e: Exception) {
             results.add("  {\"name\":${jsonString(fn.name)},\"error\":${jsonString(e.message)}}")
         }
     }
-    return "{\"functions\":[\n${results.joinToString(",\n")}\n]}"
+    return "{\"previews\":[\n${results.joinToString(",\n")}\n]}"
 }
 
 fun jsonString(value: String?): String {

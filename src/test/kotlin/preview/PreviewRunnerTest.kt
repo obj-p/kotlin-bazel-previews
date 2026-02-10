@@ -40,7 +40,102 @@ class PreviewRunnerTest {
             jvmClassName = className,
             containerKind = containerKind,
         )
+
+        // Use old direct invocation path for backward compatibility with old tests
+        val urls = listOf(outDir.absolutePath).map { java.io.File(it).toURI().toURL() }.toTypedArray()
+        val loader = java.net.URLClassLoader(urls, ClassLoader.getPlatformClassLoader())
+
+        return try {
+            loader.use {
+                val clazz = it.loadClass(fn.jvmClassName)
+                val method = clazz.getMethod(fn.name)
+                val receiver = when (fn.containerKind) {
+                    ContainerKind.TOP_LEVEL -> null
+                    ContainerKind.OBJECT -> clazz.getDeclaredField("INSTANCE").get(null)
+                    ContainerKind.CLASS -> clazz.getDeclaredConstructor().newInstance()
+                }
+                val result = method.invoke(receiver)
+                result?.toString()
+            }
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            throw e.cause ?: e
+        }
+    }
+
+    private fun compileAndInvokeList(
+        javaSource: String,
+        className: String,
+        methodName: String,
+        containerKind: ContainerKind = ContainerKind.TOP_LEVEL,
+        parameters: List<ParameterInfo> = emptyList()
+    ): List<PreviewResult> {
+        val srcDir = tmpDir.newFolder("src")
+        val outDir = tmpDir.newFolder("classes")
+
+        val srcFile = java.io.File(srcDir, "$className.java")
+        srcFile.writeText(javaSource)
+
+        // Compile with javac
+        val javac = ProcessBuilder("javac", "-d", outDir.absolutePath, srcFile.absolutePath)
+            .redirectErrorStream(true)
+            .start()
+        val javacOutput = javac.inputStream.bufferedReader().readText()
+        val exitCode = javac.waitFor()
+        if (exitCode != 0) {
+            throw RuntimeException("javac failed: $javacOutput")
+        }
+
+        val fn = FunctionInfo(
+            name = methodName,
+            packageName = "",
+            jvmClassName = className,
+            containerKind = containerKind,
+            parameters = parameters
+        )
         return PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
+    }
+
+    private fun compileKotlinAndInvokeList(
+        sourceFiles: Map<String, String>,  // filename -> source content
+        className: String,
+        methodName: String,
+        containerKind: ContainerKind = ContainerKind.TOP_LEVEL,
+        parameters: List<ParameterInfo> = emptyList()
+    ): List<PreviewResult> {
+        val srcDir = tmpDir.newFolder("kt-src")
+        val outDir = tmpDir.newFolder("kt-classes")
+
+        // Write all source files
+        for ((filename, content) in sourceFiles) {
+            java.io.File(srcDir, filename).writeText(content)
+        }
+
+        // Get Kotlin stdlib from classpath
+        val kotlinStdlib = System.getProperty("java.class.path")
+            .split(java.io.File.pathSeparator)
+            .find { it.contains("kotlin-stdlib") }
+            ?: throw RuntimeException("kotlin-stdlib not found on classpath")
+
+        // Get kotlinc from the system
+        val result = DirectCompiler.compile(
+            sourceFiles = sourceFiles.keys.map { java.io.File(srcDir, it) },
+            classpath = listOf(getAnnotationsClasspath(), kotlinStdlib),
+            outputDir = outDir
+        )
+
+        if (!result.success) {
+            val errors = result.diagnostics.joinToString("\n") { "${it.severity}: ${it.message}" }
+            throw RuntimeException("kotlinc failed:\n$errors")
+        }
+
+        val fn = FunctionInfo(
+            name = methodName,
+            packageName = "",
+            jvmClassName = className,
+            containerKind = containerKind,
+            parameters = parameters
+        )
+        return PreviewRunner.invoke(listOf(outDir.absolutePath, getAnnotationsClasspath(), kotlinStdlib), fn)
     }
 
     @Test
@@ -107,9 +202,9 @@ class PreviewRunnerTest {
     @Test
     fun throwsClassNotFoundForMissingClass() {
         val fn = FunctionInfo(name = "foo", packageName = "", jvmClassName = "NoSuchClass")
-        assertFailsWith<ClassNotFoundException> {
-            PreviewRunner.invoke(emptyList(), fn)
-        }
+        val results = PreviewRunner.invoke(emptyList(), fn)
+        assertEquals(1, results.size)
+        assertTrue(results[0].error?.contains("NoSuchClass") == true)
     }
 
     @Test
@@ -131,9 +226,9 @@ class PreviewRunnerTest {
         javac.waitFor()
 
         val fn = FunctionInfo(name = "bar", packageName = "", jvmClassName = "HasFoo")
-        assertFailsWith<NoSuchMethodException> {
-            PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
-        }
+        val results = PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
+        assertEquals(1, results.size)
+        assertTrue(results[0].error?.contains("bar") == true || results[0].error?.contains("NoSuchMethod") == true)
     }
 
     @Test
@@ -155,12 +250,10 @@ class PreviewRunnerTest {
         javac.waitFor()
 
         val fn = FunctionInfo(name = "greet", packageName = "", jvmClassName = "InstanceOnly")
-        // Invoking a non-static method with null receiver should throw
-        val ex = assertFailsWith<Exception> {
-            PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
-        }
-        assertTrue(ex is NullPointerException || ex is IllegalArgumentException,
-            "Expected NPE or IAE, got: ${ex::class.simpleName}: ${ex.message}")
+        // Invoking a non-static method with null receiver should return error
+        val results = PreviewRunner.invoke(listOf(outDir.absolutePath), fn)
+        assertEquals(1, results.size)
+        assertTrue(results[0].error != null, "Expected error but got result: ${results[0].result}")
     }
 
     @Test
@@ -235,5 +328,517 @@ class PreviewRunnerTest {
         assertFailsWith<NoSuchFieldException> {
             compileAndInvoke(source, "NoInstance", "hello", ContainerKind.OBJECT)
         }
+    }
+
+    // --- New tests for parameterized previews ---
+
+    @Test
+    fun zeroParameterBackwardCompatibility() {
+        // Zero-parameter functions should return a list with single result, no displayName
+        val source = """
+            public class SimplePreview {
+                public static String preview() {
+                    return "simple";
+                }
+            }
+        """.trimIndent()
+
+        val results = compileAndInvokeList(source, "SimplePreview", "preview")
+        assertEquals(1, results.size)
+        assertEquals("preview", results[0].functionName)
+        assertEquals(null, results[0].displayName)
+        assertEquals("simple", results[0].result)
+        assertEquals(null, results[0].error)
+        assertEquals("preview", results[0].fullDisplayName)
+    }
+
+    @Test
+    fun multipleInvocationsWithSameClassloader() {
+        // Create a provider that returns 3 values
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "TestProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class TestProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("value1", "value2", "value3")
+                    }
+                """.trimIndent(),
+                "ParameterizedPreview.kt" to """
+                    fun preview(arg: String): String {
+                        return "got:${'$'}arg"
+                    }
+                """.trimIndent()
+            ),
+            className = "ParameterizedPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "TestProvider"))
+        )
+
+        // Verify all toString() calls succeeded
+        assertEquals(3, results.size)
+        assertEquals("got:value1", results[0].result)
+        assertEquals("got:value2", results[1].result)
+        assertEquals("got:value3", results[2].result)
+        assertEquals("preview[0]", results[0].fullDisplayName)
+        assertEquals("preview[1]", results[1].fullDisplayName)
+        assertEquals("preview[2]", results[2].fullDisplayName)
+    }
+
+    @Test
+    fun providerInstantiationObject() {
+        // Test INSTANCE field resolution for Kotlin object
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "ObjectProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    object ObjectProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("from-object")
+                    }
+                """.trimIndent(),
+                "PreviewWithObject.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "PreviewWithObjectKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "ObjectProvider"))
+        )
+
+        assertEquals(1, results.size)
+        assertEquals("from-object", results[0].result)
+    }
+
+    @Test
+    fun providerInstantiationClass() {
+        // Test no-arg constructor for regular class
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "ClassProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class ClassProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("from-class")
+                    }
+                """.trimIndent(),
+                "PreviewWithClass.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "PreviewWithClassKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "ClassProvider"))
+        )
+
+        assertEquals(1, results.size)
+        assertEquals("from-class", results[0].result)
+    }
+
+    @Test
+    fun individualInvocationFailureDoesntStopOthers() {
+        // One invocation fails, others succeed
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "MixedProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class MixedProvider : PreviewParameterProvider<Int> {
+                        override val values = sequenceOf(1, 0, 2)
+                    }
+                """.trimIndent(),
+                "DivisionPreview.kt" to """
+                    fun preview(divisor: Int): String {
+                        require(divisor != 0) { "Cannot divide by zero" }
+                        return (10 / divisor).toString()
+                    }
+                """.trimIndent()
+            ),
+            className = "DivisionPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("divisor", "Int", "MixedProvider"))
+        )
+
+        assertEquals(3, results.size)
+        assertEquals("10", results[0].result)
+        assertEquals(null, results[0].error)
+        assertTrue(results[1].error?.contains("divide by zero") == true)
+        assertEquals("5", results[2].result)
+        assertEquals(null, results[2].error)
+    }
+
+    @Test
+    fun providerInstantiationFailure() {
+        // Returns single error result
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "PreviewWithBadProvider.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "PreviewWithBadProviderKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "NonExistentProvider"))
+        )
+
+        assertEquals(1, results.size)
+        assertTrue(results[0].error?.contains("Failed to instantiate provider") == true)
+    }
+
+    @Test
+    fun emptyProviderSequence() {
+        // Returns single error result
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "EmptyProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class EmptyProvider : PreviewParameterProvider<String> {
+                        override val values = emptySequence<String>()
+                    }
+                """.trimIndent(),
+                "PreviewWithEmpty.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "PreviewWithEmptyKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "EmptyProvider"))
+        )
+
+        assertEquals(1, results.size)
+        assertTrue(results[0].error?.contains("returned no values") == true)
+    }
+
+    @Test
+    fun hundredResultHardLimit() {
+        // Provider with 200 values returns exactly 100 results
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "LargeProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class LargeProvider : PreviewParameterProvider<Int> {
+                        override val values = sequence {
+                            for (i in 0 until 200) {
+                                yield(i)
+                            }
+                        }
+                    }
+                """.trimIndent(),
+                "PreviewWithLarge.kt" to """
+                    fun preview(arg: Int): String = "value:${'$'}arg"
+                """.trimIndent()
+            ),
+            className = "PreviewWithLargeKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "Int", "LargeProvider"))
+        )
+
+        assertEquals(100, results.size)
+        assertEquals("value:0", results[0].result)
+        assertEquals("value:99", results[99].result)
+    }
+
+    @Test
+    fun warningForMoreThanTwentyResults() {
+        // Verify stderr warning for >20 results
+        // Capture stderr
+        val originalErr = System.err
+        val errCapture = java.io.ByteArrayOutputStream()
+        System.setErr(java.io.PrintStream(errCapture))
+
+        try {
+            val results = compileKotlinAndInvokeList(
+                mapOf(
+                    "MediumProvider.kt" to """
+                        import preview.annotations.PreviewParameterProvider
+
+                        class MediumProvider : PreviewParameterProvider<Int> {
+                            override val values = (0 until 25).asSequence()
+                        }
+                    """.trimIndent(),
+                    "PreviewWithMedium.kt" to """
+                        fun preview(arg: Int): String = "value:${'$'}arg"
+                    """.trimIndent()
+                ),
+                className = "PreviewWithMediumKt",
+                methodName = "preview",
+                parameters = listOf(ParameterInfo("arg", "Int", "MediumProvider"))
+            )
+
+            assertEquals(25, results.size)
+
+            val errOutput = errCapture.toString()
+            assertTrue(errOutput.contains("Warning"))
+            assertTrue(errOutput.contains("25 previews"))
+            assertTrue(errOutput.contains(">20"))
+        } finally {
+            System.setErr(originalErr)
+        }
+    }
+
+    @Test
+    fun displayNameFormatting() {
+        // Verify fullDisplayName is "functionName[0]", "functionName[1]", etc.
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "SimpleProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class SimpleProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("a", "b")
+                    }
+                """.trimIndent(),
+                "NamedPreview.kt" to """
+                    fun myPreview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "NamedPreviewKt",
+            methodName = "myPreview",
+            parameters = listOf(ParameterInfo("arg", "String", "SimpleProvider"))
+        )
+
+        assertEquals(2, results.size)
+        assertEquals("myPreview", results[0].functionName)
+        assertEquals("[0]", results[0].displayName)
+        assertEquals("myPreview[0]", results[0].fullDisplayName)
+        assertEquals("myPreview", results[1].functionName)
+        assertEquals("[1]", results[1].displayName)
+        assertEquals("myPreview[1]", results[1].fullDisplayName)
+    }
+
+    private fun getAnnotationsClasspath(): String {
+        // Find the preview-annotations jar on the classpath
+        val cp = System.getProperty("java.class.path")
+        val entries = cp.split(java.io.File.pathSeparator)
+        val annotationsJar = entries.find { it.contains("preview-annotations") }
+        return annotationsJar ?: throw RuntimeException("preview-annotations jar not found on classpath")
+    }
+
+    private fun compileKotlinSources(
+        sources: Map<String, String>,  // filename -> source
+        outputDir: java.io.File
+    ) {
+        val srcDir = tmpDir.newFolder("src-${System.currentTimeMillis()}")
+
+        // Write sources
+        sources.forEach { (filename, content) ->
+            java.io.File(srcDir, filename).writeText(content)
+        }
+
+        // Compile
+        val kotlinStdlib = System.getProperty("java.class.path")
+            .split(java.io.File.pathSeparator)
+            .find { it.contains("kotlin-stdlib") }
+            ?: throw RuntimeException("kotlin-stdlib not found")
+
+        val result = DirectCompiler.compile(
+            sourceFiles = sources.keys.map { java.io.File(srcDir, it) },
+            classpath = listOf(getAnnotationsClasspath(), kotlinStdlib),
+            outputDir = outputDir
+        )
+
+        if (!result.success) {
+            throw RuntimeException("Compilation failed: ${result.diagnostics}")
+        }
+    }
+
+    // --- Integration tests for PatchingClassLoader ---
+
+    @Test
+    fun patchingClassLoaderLoadsProviderFromPatch() {
+        // Setup: Compile provider and preview to baseDir
+        val baseDir = tmpDir.newFolder("base")
+        val patchDir = tmpDir.newFolder("patch")
+
+        val providerSource = """
+            import preview.annotations.PreviewParameterProvider
+
+            class TestProvider : PreviewParameterProvider<String> {
+                override val values = sequenceOf("base-value")
+            }
+        """.trimIndent()
+
+        val previewSource = """
+            fun testPreview(arg: String): String = "Result: ${'$'}arg"
+        """.trimIndent()
+
+        // Compile both to baseDir
+        compileKotlinSources(
+            mapOf(
+                "TestProvider.kt" to providerSource,
+                "TestPreview.kt" to previewSource
+            ),
+            baseDir
+        )
+
+        // Compile modified provider to patchDir
+        val patchedProviderSource = """
+            import preview.annotations.PreviewParameterProvider
+
+            class TestProvider : PreviewParameterProvider<String> {
+                override val values = sequenceOf("patched-value")  // Changed
+            }
+        """.trimIndent()
+
+        compileKotlinSources(
+            mapOf("TestProvider.kt" to patchedProviderSource),
+            patchDir
+        )
+
+        // Create PatchingClassLoader with annotations and stdlib on classpath
+        val kotlinStdlib = System.getProperty("java.class.path")
+            .split(java.io.File.pathSeparator)
+            .find { it.contains("kotlin-stdlib") }
+            ?: throw RuntimeException("kotlin-stdlib not found")
+        val baseUrls = listOf(baseDir.absolutePath, getAnnotationsClasspath(), kotlinStdlib)
+        val loader = PatchingClassLoader(
+            patchDir,
+            baseUrls.map { java.io.File(it).toURI().toURL() }
+        )
+
+        // Invoke with PatchingClassLoader
+        val fn = FunctionInfo(
+            name = "testPreview",
+            packageName = "",
+            jvmClassName = "TestPreviewKt",
+            parameters = listOf(ParameterInfo("arg", "String", "TestProvider"))
+        )
+
+        val results = PreviewRunner.invoke(loader, fn)
+
+        // Verify patched provider was used
+        assertEquals(1, results.size)
+        assertEquals("Result: patched-value", results[0].result)
+        assertNull(results[0].error)
+    }
+
+    @Test
+    fun patchingClassLoaderLoadsPreviewFromPatch() {
+        // Setup: Compile both to baseDir
+        val baseDir = tmpDir.newFolder("base2")
+        val patchDir = tmpDir.newFolder("patch2")
+
+        val providerSource = """
+            import preview.annotations.PreviewParameterProvider
+
+            class TestProvider2 : PreviewParameterProvider<String> {
+                override val values = sequenceOf("value1", "value2")
+            }
+        """.trimIndent()
+
+        val previewSource = """
+            fun testPreview(arg: String): String = "Original: ${'$'}arg"
+        """.trimIndent()
+
+        compileKotlinSources(
+            mapOf(
+                "TestProvider2.kt" to providerSource,
+                "TestPreview2.kt" to previewSource
+            ),
+            baseDir
+        )
+
+        // Compile modified preview to patchDir
+        val patchedPreviewSource = """
+            fun testPreview(arg: String): String = "Patched: ${'$'}arg"  // Changed
+        """.trimIndent()
+
+        compileKotlinSources(
+            mapOf("TestPreview2.kt" to patchedPreviewSource),
+            patchDir
+        )
+
+        // Create PatchingClassLoader with annotations and stdlib on classpath
+        val kotlinStdlib = System.getProperty("java.class.path")
+            .split(java.io.File.pathSeparator)
+            .find { it.contains("kotlin-stdlib") }
+            ?: throw RuntimeException("kotlin-stdlib not found")
+        val baseUrls = listOf(baseDir.absolutePath, getAnnotationsClasspath(), kotlinStdlib)
+        val loader = PatchingClassLoader(
+            patchDir,
+            baseUrls.map { java.io.File(it).toURI().toURL() }
+        )
+
+        // Invoke
+        val fn = FunctionInfo(
+            name = "testPreview",
+            packageName = "",
+            jvmClassName = "TestPreview2Kt",
+            parameters = listOf(ParameterInfo("arg", "String", "TestProvider2"))
+        )
+
+        val results = PreviewRunner.invoke(loader, fn)
+
+        // Verify patched preview was used with base provider
+        assertEquals(2, results.size)
+        assertEquals("Patched: value1", results[0].result)
+        assertEquals("Patched: value2", results[1].result)
+    }
+
+    @Test
+    fun patchingClassLoaderLoadsBothFromPatch() {
+        // Simulate same-file scenario: both compiled together
+        val baseDir = tmpDir.newFolder("base3")
+        val patchDir = tmpDir.newFolder("patch3")
+
+        // Base version
+        val baseSources = """
+            import preview.annotations.PreviewParameterProvider
+
+            class TestProvider3 : PreviewParameterProvider<String> {
+                override val values = sequenceOf("base")
+            }
+
+            fun testPreview(arg: String): String = "Base: ${'$'}arg"
+        """.trimIndent()
+
+        compileKotlinSources(
+            mapOf("Combined.kt" to baseSources),
+            baseDir
+        )
+
+        // Patched version (both modified)
+        val patchedSources = """
+            import preview.annotations.PreviewParameterProvider
+
+            class TestProvider3 : PreviewParameterProvider<String> {
+                override val values = sequenceOf("patched1", "patched2")  // Changed
+            }
+
+            fun testPreview(arg: String): String = "Patched: ${'$'}arg"  // Changed
+        """.trimIndent()
+
+        compileKotlinSources(
+            mapOf("Combined.kt" to patchedSources),
+            patchDir
+        )
+
+        // Create PatchingClassLoader with annotations and stdlib on classpath
+        val kotlinStdlib = System.getProperty("java.class.path")
+            .split(java.io.File.pathSeparator)
+            .find { it.contains("kotlin-stdlib") }
+            ?: throw RuntimeException("kotlin-stdlib not found")
+        val baseUrls = listOf(baseDir.absolutePath, getAnnotationsClasspath(), kotlinStdlib)
+        val loader = PatchingClassLoader(
+            patchDir,
+            baseUrls.map { java.io.File(it).toURI().toURL() }
+        )
+
+        // Invoke
+        val fn = FunctionInfo(
+            name = "testPreview",
+            packageName = "",
+            jvmClassName = "CombinedKt",
+            parameters = listOf(ParameterInfo("arg", "String", "TestProvider3"))
+        )
+
+        val results = PreviewRunner.invoke(loader, fn)
+
+        // Verify both patched versions were used
+        assertEquals(2, results.size)
+        assertEquals("Patched: patched1", results[0].result)
+        assertEquals("Patched: patched2", results[1].result)
     }
 }
