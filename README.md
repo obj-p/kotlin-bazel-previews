@@ -129,13 +129,15 @@ Use multiple `@PreviewParameter` annotations to test all combinations:
 data class Theme(val name: String, val primaryColor: String)
 
 class ThemeProvider : PreviewParameterProvider<Theme> {
-    override val values = sequenceOf(
+    private val themeList = listOf(
         Theme("Light", "#FFFFFF"),
         Theme("Dark", "#000000")
     )
 
+    override val values = themeList.asSequence()
+
     override fun getDisplayName(index: Int): String? {
-        return values.elementAtOrNull(index)?.name
+        return themeList.getOrNull(index)?.name
     }
 }
 

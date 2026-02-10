@@ -4,10 +4,12 @@ import preview.annotations.Preview
 import preview.annotations.PreviewParameter
 
 /**
- * Example demonstrating parameterized previews.
+ * Example demonstrating parameterized previews with custom display names.
  *
- * SourceAnalyzer now supports @PreviewParameter (Issue 2 complete).
- * PreviewRunner support (Issue 3) is still in progress.
+ * This example shows:
+ * - Single @PreviewParameter annotation
+ * - Custom display names via getDisplayName()
+ * - Efficient O(n) implementation using materialized list
  */
 object ParameterizedPreview {
 

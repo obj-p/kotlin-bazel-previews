@@ -15,13 +15,15 @@ data class Theme(val name: String, val primaryColor: String)
  * Demonstrates custom display names via getDisplayName().
  */
 class ThemePreviewParameterProvider : PreviewParameterProvider<Theme> {
-    override val values = sequenceOf(
+    private val themeList = listOf(
         Theme("Light", "#FFFFFF"),
         Theme("Dark", "#000000")
     )
 
+    override val values = themeList.asSequence()
+
     override fun getDisplayName(index: Int): String? {
-        return values.elementAtOrNull(index)?.name
+        return themeList.getOrNull(index)?.name
     }
 }
 
