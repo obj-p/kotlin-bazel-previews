@@ -252,7 +252,7 @@ object PreviewRunner {
             } catch (e: Exception) {
                 // Log warning but don't fail - fall back to index
                 System.err.println(
-                    "[Preview] Warning: getDisplayName($index) threw exception: ${e.message}"
+                    "[Preview] Warning: ${providerInstance.javaClass.name}.getDisplayName($index) threw exception: ${e.message}"
                 )
                 null
             }

@@ -10,13 +10,16 @@ data class User(val name: String, val age: Int)
  * Demonstrates custom display names via getDisplayName().
  */
 class UserPreviewParameterProvider : PreviewParameterProvider<User> {
-    override val values = sequenceOf(
+    // Materialize to list for efficient getDisplayName() access
+    private val userList = listOf(
         User("Alice Anderson", 25),
         User("Bob Builder", 35),
         User("Charlie Chaplin", 45)
     )
 
+    override val values = userList.asSequence()
+
     override fun getDisplayName(index: Int): String? {
-        return values.elementAtOrNull(index)?.name
+        return userList.getOrNull(index)?.name
     }
 }

@@ -39,6 +39,16 @@ interface PreviewParameterProvider<T> {
      * If this method returns null or is not implemented, the default
      * display name format "[index]" will be used.
      *
+     * **Important**: If you need to access the sequence values in this method,
+     * materialize the sequence to a list first to avoid O(n²) complexity:
+     * ```kotlin
+     * class MyProvider : PreviewParameterProvider<String> {
+     *     private val items = listOf("a", "b", "c")
+     *     override val values = items.asSequence()
+     *     override fun getDisplayName(index: Int) = items.getOrNull(index)
+     * }
+     * ```
+     *
      * @param index The zero-based index of the value in the sequence
      * @return A custom display name, or null to use the default format
      */
