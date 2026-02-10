@@ -23,7 +23,32 @@ enum class ContainerKind { TOP_LEVEL, OBJECT, CLASS }
 data class ParameterInfo(
     val name: String,           // Parameter name (e.g., "user")
     val type: String,           // Parameter type (e.g., "User")
-    val providerClass: String   // FQN (e.g., "examples.UserProvider")
+    val providerClass: String,  // FQN (e.g., "examples.UserProvider")
+    val limit: Int = -1,        // Max values from provider (-1 = use default 100)
+    val sourceLine: Int? = null // 1-indexed line number in source file
+)
+
+/**
+ * Result of analyzing a source file for preview functions.
+ */
+sealed class AnalysisResult {
+    data class Success(val functions: List<FunctionInfo>) : AnalysisResult()
+    data class ValidationError(
+        val fileName: String,
+        val errors: List<ValidationIssue>,
+        val partialResults: List<FunctionInfo> = emptyList()
+    ) : AnalysisResult()
+}
+
+/**
+ * Represents a validation issue found during analysis.
+ */
+data class ValidationIssue(
+    val parameterName: String,
+    val functionName: String,
+    val line: Int?,
+    val message: String,
+    val suggestion: String?
 )
 
 data class FunctionInfo(
@@ -49,6 +74,16 @@ class SourceAnalyzer : Closeable {
         check(!disposed) { "SourceAnalyzer has been closed" }
         val file = File(filePath)
         return findPreviewFunctionsFromContent(file.readText(), file.name)
+    }
+
+    /**
+     * Find preview functions with validation.
+     * Returns AnalysisResult.Success or AnalysisResult.ValidationError.
+     */
+    fun findPreviewFunctionsValidated(filePath: String): AnalysisResult {
+        check(!disposed) { "SourceAnalyzer has been closed" }
+        val file = File(filePath)
+        return findPreviewFunctionsFromContentValidated(file.readText(), file.name)
     }
 
     fun findPreviewFunctionsFromContent(content: String, fileName: String): List<FunctionInfo> {
@@ -86,6 +121,46 @@ class SourceAnalyzer : Closeable {
         return results
     }
 
+    fun findPreviewFunctionsFromContentValidated(content: String, fileName: String): AnalysisResult {
+        check(!disposed) { "SourceAnalyzer has been closed" }
+        val ktFile = KtPsiFactory(psiProject, markGenerated = false).createFile(fileName, content)
+        val packageName = ktFile.packageFqName.asString()
+        val jvmClassName = deriveJvmClassName(ktFile, fileName, packageName)
+
+        val results = mutableListOf<FunctionInfo>()
+        val validationIssues = mutableListOf<ValidationIssue>()
+
+        // Top-level functions
+        ktFile.declarations
+            .filterIsInstance<KtNamedFunction>()
+            .filter { isPreviewCandidate(it) }
+            .mapNotNullTo(results) { fn ->
+                fn.name?.let { name ->
+                    val (parameters, issues) = extractParameterInfoWithValidation(fn, packageName, ktFile)
+                    validationIssues.addAll(issues)
+
+                    FunctionInfo(
+                        name = name,
+                        packageName = packageName,
+                        jvmClassName = jvmClassName,
+                        containerKind = ContainerKind.TOP_LEVEL,
+                        parameters = parameters
+                    )
+                }
+            }
+
+        // Top-level classes and objects
+        for (classOrObject in ktFile.declarations.filterIsInstance<KtClassOrObject>()) {
+            collectFromContainerValidated(classOrObject, packageName, results, validationIssues)
+        }
+
+        return if (validationIssues.isEmpty()) {
+            AnalysisResult.Success(results)
+        } else {
+            AnalysisResult.ValidationError(fileName, validationIssues, results)
+        }
+    }
+
     private fun collectFromContainer(
         classOrObject: KtClassOrObject,
         packageName: String,
@@ -118,6 +193,41 @@ class SourceAnalyzer : Closeable {
         classOrObject.body?.declarations
             ?.filterIsInstance<KtClassOrObject>()
             ?.forEach { nested -> collectFromContainer(nested, packageName, results) }
+    }
+
+    private fun collectFromContainerValidated(
+        classOrObject: KtClassOrObject,
+        packageName: String,
+        results: MutableList<FunctionInfo>,
+        validationIssues: MutableList<ValidationIssue>
+    ) {
+        val containerKind = containerKindOf(classOrObject) ?: return
+        val containerJvmClassName = deriveContainerJvmClassName(classOrObject, packageName)
+        val ktFile = classOrObject.containingKtFile
+
+        // Functions directly in this container
+        classOrObject.body?.declarations
+            ?.filterIsInstance<KtNamedFunction>()
+            ?.filter { isPreviewCandidate(it) }
+            ?.mapNotNullTo(results) { fn ->
+                fn.name?.let { name ->
+                    val (parameters, issues) = extractParameterInfoWithValidation(fn, packageName, ktFile)
+                    validationIssues.addAll(issues)
+
+                    FunctionInfo(
+                        name = name,
+                        packageName = packageName,
+                        jvmClassName = containerJvmClassName,
+                        containerKind = containerKind,
+                        parameters = parameters
+                    )
+                }
+            }
+
+        // One level deeper: companion objects and nested objects inside classes
+        classOrObject.body?.declarations
+            ?.filterIsInstance<KtClassOrObject>()
+            ?.forEach { nested -> collectFromContainerValidated(nested, packageName, results, validationIssues) }
     }
 
     private fun containerKindOf(classOrObject: KtClassOrObject): ContainerKind? {
@@ -177,7 +287,95 @@ class SourceAnalyzer : Closeable {
             return null
         }
 
-        return ParameterInfo(paramName, paramType, providerClass)
+        // Extract limit parameter (default to -1 if not specified)
+        val limitArg = annotation.valueArguments
+            .find { it.getArgumentName()?.asName?.asString() == "limit" }
+            ?.getArgumentExpression()
+            ?.text
+            ?.toIntOrNull() ?: -1
+
+        // Extract source line number for better error reporting
+        val sourceLine = param.textRange?.startOffset?.let { offset ->
+            ktFile.viewProvider.document?.getLineNumber(offset)?.plus(1)  // 1-indexed
+        }
+
+        return ParameterInfo(paramName, paramType, providerClass, limitArg, sourceLine)
+    }
+
+    /**
+     * Extract parameter info with validation.
+     * Returns a pair of (list of parameters, list of validation issues).
+     */
+    private fun extractParameterInfoWithValidation(
+        fn: KtNamedFunction,
+        packageName: String,
+        ktFile: KtFile
+    ): Pair<List<ParameterInfo>, List<ValidationIssue>> {
+        val parameters = mutableListOf<ParameterInfo>()
+        val issues = mutableListOf<ValidationIssue>()
+        val functionName = fn.name ?: "unknown"
+
+        for (param in fn.valueParameters) {
+            val paramName = param.name ?: continue
+            val paramType = param.typeReference?.text ?: continue
+
+            val annotation = param.annotationEntries.firstOrNull {
+                it.shortName?.asString() == "PreviewParameter" ||
+                    it.text.contains("preview.annotations.PreviewParameter")
+            } ?: continue
+
+            val sourceLine = param.textRange?.startOffset?.let { offset ->
+                ktFile.viewProvider.document?.getLineNumber(offset)?.plus(1)
+            }
+
+            val providerClass = try {
+                extractProviderClass(annotation, packageName, ktFile)
+            } catch (e: IllegalArgumentException) {
+                issues.add(ValidationIssue(
+                    parameterName = paramName,
+                    functionName = functionName,
+                    line = sourceLine,
+                    message = "Failed to extract provider: ${e.message}",
+                    suggestion = "Check that provider class is imported correctly"
+                ))
+                continue
+            }
+
+            // Validate provider class name
+            if (!isValidClassName(providerClass)) {
+                issues.add(ValidationIssue(
+                    parameterName = paramName,
+                    functionName = functionName,
+                    line = sourceLine,
+                    message = "Invalid provider class name: '$providerClass'",
+                    suggestion = "Check that provider class is imported correctly"
+                ))
+                continue
+            }
+
+            // Extract limit parameter
+            val limitArg = annotation.valueArguments
+                .find { it.getArgumentName()?.asName?.asString() == "limit" }
+                ?.getArgumentExpression()
+                ?.text
+                ?.toIntOrNull() ?: -1
+
+            parameters.add(ParameterInfo(paramName, paramType, providerClass, limitArg, sourceLine))
+        }
+
+        return parameters to issues
+    }
+
+    /**
+     * Validate that a fully-qualified class name is valid.
+     */
+    private fun isValidClassName(fqn: String): Boolean {
+        if (fqn.isEmpty()) return false
+        return fqn.split('.').all { segment ->
+            segment.isNotEmpty() &&
+            segment[0].isJavaIdentifierStart() &&
+            segment.all { it.isJavaIdentifierPart() }
+        }
     }
 
     private fun extractProviderClass(

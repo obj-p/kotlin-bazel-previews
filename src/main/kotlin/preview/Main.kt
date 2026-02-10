@@ -14,6 +14,13 @@ fun main(args: Array<String>) {
     val workspaceRoot = parsed.workspaceRoot
     val filePath = parsed.filePath
     val watch = parsed.watch
+    val profile = parsed.profile
+
+    // Set system property for profiling
+    if (profile) {
+        System.setProperty("preview.profile", "true")
+        System.err.println("[profile] Profiling enabled")
+    }
 
     val wsDir = File(workspaceRoot)
     if (!wsDir.isDirectory) {
@@ -48,27 +55,44 @@ private fun runOnce(workspaceRoot: String, filePath: String, sourceFile: File) {
     println("Build complete. Found ${classpath.size} classpath entries.")
 
     println("Analyzing $filePath...")
-    val functions = SourceAnalyzer().use { it.findPreviewFunctions(sourceFile.absolutePath) }
-    if (functions.isEmpty()) {
-        println("No @Preview functions found.")
-        return
-    }
-    println("Found ${functions.size} @Preview function${if (functions.size == 1) "" else "s"}: ${functions.joinToString { it.name }}")
+    val analysisResult = SourceAnalyzer().use { it.findPreviewFunctionsValidated(sourceFile.absolutePath) }
 
-    for (fn in functions) {
-        println("Invoking ${fn.name}()...")
-        val results = PreviewRunner.invoke(classpath, fn)
-
-        if (results.isEmpty()) {
-            println("${fn.name}() => (no results)")
-            continue
+    // Check for validation errors
+    when (analysisResult) {
+        is AnalysisResult.ValidationError -> {
+            System.err.println("Validation errors in ${analysisResult.fileName}:")
+            for (issue in analysisResult.errors) {
+                val location = issue.line?.let { " (line $it)" } ?: ""
+                System.err.println("  ${issue.functionName}::${issue.parameterName}$location")
+                System.err.println("    ${issue.message}")
+                issue.suggestion?.let { System.err.println("    Suggestion: $it") }
+            }
+            exitProcess(1)
         }
+        is AnalysisResult.Success -> {
+            val functions = analysisResult.functions
+            if (functions.isEmpty()) {
+                println("No @Preview functions found.")
+                return
+            }
+            println("Found ${functions.size} @Preview function${if (functions.size == 1) "" else "s"}: ${functions.joinToString { it.name }}")
 
-        for (previewResult in results) {
-            if (previewResult.error != null) {
-                println("${previewResult.fullDisplayName} => ERROR: ${previewResult.error}")
-            } else {
-                println("${previewResult.fullDisplayName} => ${previewResult.result}")
+            for (fn in functions) {
+                println("Invoking ${fn.name}()...")
+                val results = PreviewRunner.invoke(classpath, fn)
+
+                if (results.isEmpty()) {
+                    println("${fn.name}() => (no results)")
+                    continue
+                }
+
+                for (previewResult in results) {
+                    if (previewResult.error != null) {
+                        println("${previewResult.fullDisplayName} => ERROR: ${previewResult.error}")
+                    } else {
+                        println("${previewResult.fullDisplayName} => ${previewResult.result}")
+                    }
+                }
             }
         }
     }

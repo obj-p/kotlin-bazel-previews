@@ -15,11 +15,23 @@ data class PreviewResult(
     val functionName: String,
     val displayName: String?,
     val result: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val errorType: PreviewError? = null,  // Structured error information
+    val timingMs: Long? = null  // Execution time in milliseconds (null if profiling disabled)
 ) {
     /** Full display name: "functionName[index]" for parameterized, "functionName" for simple */
     val fullDisplayName: String
         get() = if (displayName != null) "$functionName$displayName" else functionName
+}
+
+/**
+ * Timing information for performance profiling.
+ */
+data class TimingInfo(
+    val startNanos: Long,
+    val endNanos: Long
+) {
+    val durationMs: Long get() = (endNanos - startNanos) / 1_000_000
 }
 
 object PreviewRunner {
@@ -40,6 +52,13 @@ object PreviewRunner {
         val indices: List<Int>
     )
 
+    /**
+     * Whether to enable profiling (timing) for preview execution.
+     * Set via system property: -Dpreview.profile=true
+     */
+    private val profileEnabled: Boolean
+        get() = System.getProperty("preview.profile")?.toBoolean() == true
+
     fun invoke(classpathJars: List<String>, fn: FunctionInfo): List<PreviewResult> {
         val urls = classpathJars.map { File(it).toURI().toURL() }.toTypedArray()
         return invoke(URLClassLoader(urls, ClassLoader.getPlatformClassLoader()), fn)
@@ -49,19 +68,48 @@ object PreviewRunner {
         return loader.use { invokeWithLoader(it, fn) }
     }
 
+    /**
+     * Measure execution time of a block.
+     */
+    private inline fun <T> measureTime(block: () -> T): Pair<T, TimingInfo> {
+        val start = System.nanoTime()
+        val result = block()
+        val end = System.nanoTime()
+        return result to TimingInfo(start, end)
+    }
+
     private fun invokeWithLoader(loader: URLClassLoader, fn: FunctionInfo): List<PreviewResult> {
         // Legacy path: zero-parameter functions
         if (fn.parameters.isEmpty()) {
             return try {
-                val result = invokeSingle(loader, fn, emptyList())
-                listOf(PreviewResult(fn.name, null, result = result))
-            } catch (e: Exception) {
-                val error = if (e is InvocationTargetException) {
-                    (e.cause ?: e).message
+                val (result, timing) = if (profileEnabled) {
+                    measureTime { invokeSingle(loader, fn, emptyList()) }
                 } else {
-                    e.message
+                    invokeSingle(loader, fn, emptyList()) to TimingInfo(0, 0)
                 }
-                listOf(PreviewResult(fn.name, null, error = error))
+
+                // Log slow previews if profiling is enabled
+                if (profileEnabled && timing.durationMs > 100) {
+                    System.err.println("[profile] Slow preview: ${fn.name} took ${timing.durationMs}ms")
+                }
+
+                listOf(PreviewResult(
+                    fn.name,
+                    null,
+                    result = result,
+                    timingMs = if (profileEnabled) timing.durationMs else null
+                ))
+            } catch (e: Exception) {
+                val causeMsg = if (e is InvocationTargetException) {
+                    (e.cause ?: e).message ?: (e.cause ?: e).javaClass.simpleName
+                } else {
+                    e.message ?: e.javaClass.simpleName
+                }
+                val errorType = PreviewError.InvocationFailed(
+                    displayName = fn.name,
+                    cause = causeMsg
+                )
+                listOf(PreviewResult(fn.name, null, error = errorType.message, errorType = errorType))
             }
         }
 
@@ -73,25 +121,37 @@ object PreviewRunner {
             val provider = try {
                 instantiateProvider(loader, paramInfo)
             } catch (e: Exception) {
+                val errorType = PreviewError.ProviderInstantiationFailed(
+                    providerClass = paramInfo.providerClass,
+                    parameterName = paramInfo.name,
+                    cause = e.message ?: e.javaClass.simpleName
+                )
                 return listOf(
                     PreviewResult(
                         fn.name,
                         null,
-                        error = "Failed to instantiate provider ${paramInfo.providerClass}: ${e.message}"
+                        error = errorType.message,
+                        errorType = errorType
                     )
                 )
             }
 
-            // Materialize values with hard limit of 100 per provider
-            val values = provider.values.take(100).toList()
+            // Materialize values with per-provider limit (or default of 100)
+            val effectiveLimit = if (paramInfo.limit > 0) paramInfo.limit else 100
+            val values = provider.values.take(effectiveLimit).toList()
 
             // Empty provider check
             if (values.isEmpty()) {
+                val errorType = PreviewError.ProviderEmpty(
+                    providerClass = paramInfo.providerClass,
+                    parameterName = paramInfo.name
+                )
                 return listOf(
                     PreviewResult(
                         fn.name,
                         null,
-                        error = "Provider ${paramInfo.providerClass} returned no values"
+                        error = errorType.message,
+                        errorType = errorType
                     )
                 )
             }
@@ -105,14 +165,23 @@ object PreviewRunner {
 
         // Step 3: Check limits
         if (totalCombinations > 100) {
-            // Include parameter names in error message for clarity
+            // Include parameter names and limits in error message for clarity
             val calculation = materializedProviders.zip(sizes)
-                .joinToString(" × ") { (provider, size) -> "${provider.paramInfo.name} ($size)" }
+                .joinToString(" × ") { (provider, size) ->
+                    val limitInfo = if (provider.paramInfo.limit > 0) ", limit: ${provider.paramInfo.limit}" else ""
+                    "${provider.paramInfo.name} ($size$limitInfo)"
+                }
+            val errorType = PreviewError.TooManyCombinations(
+                totalCombinations = totalCombinations,
+                parameterInfo = calculation,
+                limit = 100
+            )
             return listOf(
                 PreviewResult(
                     fn.name,
                     null,
-                    error = "Too many parameter combinations: $calculation = $totalCombinations (limit: 100)"
+                    error = errorType.message,
+                    errorType = errorType
                 )
             )
         }
@@ -139,17 +208,37 @@ object PreviewRunner {
         combinations.forEach { combo ->
             // Build multi-parameter display name
             val displayName = buildMultiParameterDisplayName(materializedProviders, combo.indices)
+            val fullName = "${fn.name}$displayName"
 
             try {
-                val result = invokeSingle(loader, fn, combo.values)
-                results.add(PreviewResult(fn.name, displayName, result = result))
-            } catch (e: Exception) {
-                val error = if (e is InvocationTargetException) {
-                    (e.cause ?: e).message
+                val (result, timing) = if (profileEnabled) {
+                    measureTime { invokeSingle(loader, fn, combo.values) }
                 } else {
-                    e.message
+                    invokeSingle(loader, fn, combo.values) to TimingInfo(0, 0)
                 }
-                results.add(PreviewResult(fn.name, displayName, error = error))
+
+                // Log slow previews if profiling is enabled
+                if (profileEnabled && timing.durationMs > 100) {
+                    System.err.println("[profile] Slow preview: $fullName took ${timing.durationMs}ms")
+                }
+
+                results.add(PreviewResult(
+                    fn.name,
+                    displayName,
+                    result = result,
+                    timingMs = if (profileEnabled) timing.durationMs else null
+                ))
+            } catch (e: Exception) {
+                val causeMsg = if (e is InvocationTargetException) {
+                    (e.cause ?: e).message ?: (e.cause ?: e).javaClass.simpleName
+                } else {
+                    e.message ?: e.javaClass.simpleName
+                }
+                val errorType = PreviewError.InvocationFailed(
+                    displayName = fullName,
+                    cause = causeMsg
+                )
+                results.add(PreviewResult(fn.name, displayName, error = errorType.message, errorType = errorType))
             }
         }
 
@@ -198,7 +287,12 @@ object PreviewRunner {
     ): String? {
         val candidates = clazz.methods.filter { it.name == fn.name && it.parameterCount == args.size }
         if (candidates.isEmpty()) {
-            throw NoSuchMethodException("No method ${fn.name} with ${args.size} parameters found in ${fn.jvmClassName}")
+            val errorType = PreviewError.MethodNotFound(
+                functionName = fn.name,
+                expectedParamCount = args.size,
+                parameterNames = fn.parameters.map { it.name }
+            )
+            throw NoSuchMethodException(errorType.message)
         }
 
         var lastException: Exception? = null
@@ -218,8 +312,14 @@ object PreviewRunner {
             }
         }
 
-        // None of the candidates worked
-        throw lastException ?: NoSuchMethodException("Could not invoke ${fn.name} with provided arguments")
+        // All candidates failed - build detailed error with type information
+        val errorType = PreviewError.TypeMismatch(
+            functionName = fn.name,
+            expectedTypes = candidates.first().parameterTypes.map { it.simpleName },
+            providedTypes = args.map { it?.javaClass?.simpleName ?: "null" },
+            parameterNames = fn.parameters.map { it.name }
+        )
+        throw IllegalArgumentException(errorType.message)
     }
 
     private fun instantiateProvider(
