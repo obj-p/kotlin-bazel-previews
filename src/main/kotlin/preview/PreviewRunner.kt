@@ -105,7 +105,9 @@ object PreviewRunner {
 
         // Step 3: Check limits
         if (totalCombinations > 100) {
-            val calculation = sizes.joinToString(" × ")
+            // Include parameter names in error message for clarity
+            val calculation = materializedProviders.zip(sizes)
+                .joinToString(" × ") { (provider, size) -> "${provider.paramInfo.name} ($size)" }
             return listOf(
                 PreviewResult(
                     fn.name,
@@ -129,6 +131,10 @@ object PreviewRunner {
         val combinations = cartesianProductWithIndices(valueSequences)
 
         // Step 5: Invoke once per combination
+        // Error isolation strategy: If one combination fails, we catch the exception,
+        // record it as an error result, and continue with the remaining combinations.
+        // This ensures that a single bad input value doesn't prevent all other previews
+        // from being generated.
         val results = mutableListOf<PreviewResult>()
         combinations.forEach { combo ->
             // Build multi-parameter display name
@@ -156,50 +162,64 @@ object PreviewRunner {
         args: List<Any?>
     ): String? {
         val clazz = loader.loadClass(fn.jvmClassName)
-
-        // Resolve parameter types for method lookup
-        // For parameterized functions, we need to find the method by examining all methods
-        // because the parameter types from the provider may not exactly match the method signature
-        // (e.g., boxed vs primitive types, different classloaders).
-        val method = if (args.isEmpty()) {
-            clazz.getMethod(fn.name)
-        } else {
-            // Find method by name and parameter count, then try to invoke it
-            val candidates = clazz.methods.filter { it.name == fn.name && it.parameterCount == args.size }
-            if (candidates.isEmpty()) {
-                throw NoSuchMethodException("No method ${fn.name} with ${args.size} parameters found in ${fn.jvmClassName}")
-            }
-            // Try each candidate until one works
-            var lastException: Exception? = null
-            for (candidate in candidates) {
-                try {
-                    // Test if this method works with our args
-                    val receiver = resolveReceiver(clazz, fn.containerKind)
-                    val result = candidate.invoke(receiver, *args.toTypedArray())
-                    // Success! Return the result immediately
-                    return result?.toString()
-                } catch (e: IllegalArgumentException) {
-                    // Wrong parameter types, try next candidate
-                    lastException = e
-                    continue
-                } catch (e: InvocationTargetException) {
-                    // Method was invoked but threw an exception - this is the right method
-                    throw e.cause ?: e
-                }
-            }
-            // None of the candidates worked
-            throw lastException ?: NoSuchMethodException("Could not invoke ${fn.name} with provided arguments")
-        }
-
         val receiver = resolveReceiver(clazz, fn.containerKind)
 
-        return try {
-            val result = method.invoke(receiver, *args.toTypedArray())
-            // CRITICAL: Call toString() BEFORE classloader closes
-            result?.toString()
-        } catch (e: InvocationTargetException) {
-            throw e.cause ?: e
+        // For parameterized functions, we need to find the method by trying candidates
+        // because parameter types from the provider may not exactly match the method signature
+        // (e.g., boxed vs primitive types, different classloaders).
+        if (args.isEmpty()) {
+            // Zero-parameter case: direct method lookup
+            val method = clazz.getMethod(fn.name)
+            return try {
+                val result = method.invoke(receiver)
+                // CRITICAL: Call toString() BEFORE classloader closes
+                result?.toString()
+            } catch (e: InvocationTargetException) {
+                throw e.cause ?: e
+            }
         }
+
+        // Parameterized case: find matching method by attempting invocation
+        return findAndInvokeMatchingMethod(clazz, fn, receiver, args)
+    }
+
+    /**
+     * Find and invoke a method that accepts the given arguments.
+     *
+     * This is necessary because parameter types from providers may not exactly match
+     * the method signature (e.g., boxed vs primitive types, different classloaders).
+     * We try each candidate method until one successfully accepts our arguments.
+     */
+    private fun findAndInvokeMatchingMethod(
+        clazz: Class<*>,
+        fn: FunctionInfo,
+        receiver: Any?,
+        args: List<Any?>
+    ): String? {
+        val candidates = clazz.methods.filter { it.name == fn.name && it.parameterCount == args.size }
+        if (candidates.isEmpty()) {
+            throw NoSuchMethodException("No method ${fn.name} with ${args.size} parameters found in ${fn.jvmClassName}")
+        }
+
+        var lastException: Exception? = null
+        for (candidate in candidates) {
+            try {
+                val result = candidate.invoke(receiver, *args.toTypedArray())
+                // Success! Return the result immediately
+                // CRITICAL: Call toString() BEFORE classloader closes
+                return result?.toString()
+            } catch (e: IllegalArgumentException) {
+                // Wrong parameter types, try next candidate
+                lastException = e
+                continue
+            } catch (e: InvocationTargetException) {
+                // Method was invoked but threw an exception - this is the right method
+                throw e.cause ?: e
+            }
+        }
+
+        // None of the candidates worked
+        throw lastException ?: NoSuchMethodException("Could not invoke ${fn.name} with provided arguments")
     }
 
     private fun instantiateProvider(
@@ -271,6 +291,10 @@ object PreviewRunner {
      * - IndexedCombination(values=[a, y], indices=[0, 1])
      * - IndexedCombination(values=[b, x], indices=[1, 0])
      * - IndexedCombination(values=[b, y], indices=[1, 1])
+     *
+     * Implementation uses recursion with depth equal to the number of parameters.
+     * With the 100-combination limit, maximum practical parameter count is 6-7,
+     * making stack overflow impossible in practice.
      *
      * @param sequences List of sequences to combine
      * @return Sequence of all combinations with their indices

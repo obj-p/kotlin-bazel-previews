@@ -1191,11 +1191,11 @@ class PreviewRunnerTest {
             )
         )
 
-        // Should return error: 10 × 11 = 110 > 100
+        // Should return error: a (10) × b (11) = 110 > 100
         assertEquals(1, results.size)
         assertNull(results[0].result)
         assertTrue(results[0].error!!.contains("Too many parameter combinations"))
-        assertTrue(results[0].error!!.contains("10 × 11 = 110"))
+        assertTrue(results[0].error!!.contains("a (10) × b (11) = 110"))
         assertTrue(results[0].error!!.contains("limit: 100"))
     }
 
@@ -1485,5 +1485,49 @@ class PreviewRunnerTest {
         assertEquals("Result: Alpha", results[0].result)
         assertEquals("singleParam[Second]", results[1].fullDisplayName)
         assertEquals("Result: Beta", results[1].result)
+    }
+
+    @Test
+    fun manyParametersRecursionDepth() {
+        // Test with 6 parameters to verify recursion depth handling
+        // 2^6 = 64 combinations (under 100 limit)
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "Providers.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class BinaryProvider : PreviewParameterProvider<Int> {
+                        override val values = sequenceOf(0, 1)
+                    }
+                """.trimIndent(),
+                "Preview.kt" to """
+                    fun combine(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int): String {
+                        return "${'$'}a${'$'}b${'$'}c${'$'}d${'$'}e${'$'}f"
+                    }
+                """.trimIndent()
+            ),
+            className = "PreviewKt",
+            methodName = "combine",
+            parameters = listOf(
+                ParameterInfo("a", "Int", "BinaryProvider"),
+                ParameterInfo("b", "Int", "BinaryProvider"),
+                ParameterInfo("c", "Int", "BinaryProvider"),
+                ParameterInfo("d", "Int", "BinaryProvider"),
+                ParameterInfo("e", "Int", "BinaryProvider"),
+                ParameterInfo("f", "Int", "BinaryProvider")
+            )
+        )
+
+        // Should generate 2^6 = 64 combinations
+        assertEquals(64, results.size)
+
+        // Verify first and last combinations
+        assertEquals("combine[0, 0, 0, 0, 0, 0]", results[0].fullDisplayName)
+        assertEquals("000000", results[0].result)
+        assertEquals("combine[1, 1, 1, 1, 1, 1]", results[63].fullDisplayName)
+        assertEquals("111111", results[63].result)
+
+        // Verify all results are successful (no stack overflow)
+        assertTrue(results.all { it.error == null })
     }
 }
