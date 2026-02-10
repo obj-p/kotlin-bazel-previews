@@ -23,6 +23,7 @@ kt_jvm_library(
     visibility = ["//src/test:__subpackages__"],
     deps = [
         ":kotlin-compiler-psi",
+        "//preview-annotations",
         "@maven//:io_methvin_directory_watcher",
     ],
 )

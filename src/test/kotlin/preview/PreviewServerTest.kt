@@ -60,24 +60,28 @@ class PreviewServerTest {
 
     @Test
     fun buildJsonOutput_emptyFunctions_returnsEmptyArray() {
-        val json = buildJsonOutput(emptyList()) { null }
-        assertEquals("{\"functions\":[]}", json)
+        val json = buildJsonOutput(emptyList()) { emptyList() }
+        assertEquals("{\"previews\":[]}", json)
     }
 
     @Test
     fun buildJsonOutput_singleSuccess_returnsResultJson() {
-        val json = buildJsonOutput(listOf(fn("hello"))) { "world" }
+        val json = buildJsonOutput(listOf(fn("hello"))) {
+            listOf(PreviewResult("hello", null, result = "world"))
+        }
         assertEquals(
-            "{\"functions\":[\n  {\"name\":\"hello\",\"result\":\"world\"}\n]}",
+            "{\"previews\":[\n  {\"name\":\"hello\",\"result\":\"world\"}\n]}",
             json,
         )
     }
 
     @Test
     fun buildJsonOutput_singleNullResult_returnsNullInJson() {
-        val json = buildJsonOutput(listOf(fn("hello"))) { null }
+        val json = buildJsonOutput(listOf(fn("hello"))) {
+            listOf(PreviewResult("hello", null, result = null))
+        }
         assertEquals(
-            "{\"functions\":[\n  {\"name\":\"hello\",\"result\":null}\n]}",
+            "{\"previews\":[\n  {\"name\":\"hello\",\"result\":null}\n]}",
             json,
         )
     }
@@ -86,7 +90,7 @@ class PreviewServerTest {
     fun buildJsonOutput_singleError_returnsErrorJson() {
         val json = buildJsonOutput(listOf(fn("boom"))) { throw RuntimeException("kaboom") }
         assertEquals(
-            "{\"functions\":[\n  {\"name\":\"boom\",\"error\":\"kaboom\"}\n]}",
+            "{\"previews\":[\n  {\"name\":\"boom\",\"error\":\"kaboom\"}\n]}",
             json,
         )
     }
@@ -96,9 +100,9 @@ class PreviewServerTest {
         val fns = listOf(fn("ok"), fn("fail"), fn("nil"))
         val json = buildJsonOutput(fns) { fi ->
             when (fi.name) {
-                "ok" -> "good"
+                "ok" -> listOf(PreviewResult("ok", null, result = "good"))
                 "fail" -> throw RuntimeException("bad")
-                else -> null
+                else -> listOf(PreviewResult("nil", null, result = null))
             }
         }
         assertTrue(json.contains("\"name\":\"ok\",\"result\":\"good\""))
@@ -109,7 +113,9 @@ class PreviewServerTest {
     @Test
     fun buildJsonOutput_specialCharsInNameAndResult() {
         val fi = FunctionInfo(name = "a\"b", packageName = "", jvmClassName = "TestKt")
-        val json = buildJsonOutput(listOf(fi)) { "line1\nline2" }
+        val json = buildJsonOutput(listOf(fi)) {
+            listOf(PreviewResult("a\"b", null, result = "line1\nline2"))
+        }
         assertTrue(json.contains("\"a\\\"b\""))
         assertTrue(json.contains("\"line1\\nline2\""))
     }

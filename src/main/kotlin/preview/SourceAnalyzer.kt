@@ -10,17 +10,28 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtClassLiteralExpression
+import org.jetbrains.kotlin.psi.KtImportDirective
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtParameter
 import org.jetbrains.kotlin.psi.KtPsiFactory
 
 enum class ContainerKind { TOP_LEVEL, OBJECT, CLASS }
+
+data class ParameterInfo(
+    val name: String,           // Parameter name (e.g., "user")
+    val type: String,           // Parameter type (e.g., "User")
+    val providerClass: String   // FQN (e.g., "examples.UserProvider")
+)
 
 data class FunctionInfo(
     val name: String,
     val packageName: String,
     val jvmClassName: String,
     val containerKind: ContainerKind = ContainerKind.TOP_LEVEL,
+    val parameters: List<ParameterInfo> = emptyList()
 )
 
 class SourceAnalyzer : Closeable {
@@ -54,11 +65,15 @@ class SourceAnalyzer : Closeable {
             .filter { isPreviewCandidate(it) }
             .mapNotNullTo(results) { fn ->
                 fn.name?.let { name ->
+                    val parameters = fn.valueParameters
+                        .mapNotNull { param -> extractParameterInfo(param, packageName, ktFile) }
+
                     FunctionInfo(
                         name = name,
                         packageName = packageName,
                         jvmClassName = jvmClassName,
                         containerKind = ContainerKind.TOP_LEVEL,
+                        parameters = parameters
                     )
                 }
             }
@@ -78,6 +93,7 @@ class SourceAnalyzer : Closeable {
     ) {
         val containerKind = containerKindOf(classOrObject) ?: return
         val containerJvmClassName = deriveContainerJvmClassName(classOrObject, packageName)
+        val ktFile = classOrObject.containingKtFile
 
         // Functions directly in this container
         classOrObject.body?.declarations
@@ -85,11 +101,15 @@ class SourceAnalyzer : Closeable {
             ?.filter { isPreviewCandidate(it) }
             ?.mapNotNullTo(results) { fn ->
                 fn.name?.let { name ->
+                    val parameters = fn.valueParameters
+                        .mapNotNull { param -> extractParameterInfo(param, packageName, ktFile) }
+
                     FunctionInfo(
                         name = name,
                         packageName = packageName,
                         jvmClassName = containerJvmClassName,
                         containerKind = containerKind,
+                        parameters = parameters
                     )
                 }
             }
@@ -116,9 +136,92 @@ class SourceAnalyzer : Closeable {
             !fn.hasModifier(KtTokens.PRIVATE_KEYWORD) &&
             !fn.hasModifier(KtTokens.SUSPEND_KEYWORD) &&
             !fn.hasModifier(KtTokens.ABSTRACT_KEYWORD) &&
-            fn.valueParameters.isEmpty() &&
+            hasValidParameters(fn) &&
             fn.receiverTypeReference == null &&
             fn.typeParameters.isEmpty()
+    }
+
+    private fun hasValidParameters(fn: KtNamedFunction): Boolean {
+        val params = fn.valueParameters
+        if (params.isEmpty()) return true  // Legacy: zero params OK
+
+        // Phase 3: All parameters must have @PreviewParameter annotation
+        return params.all { hasPreviewParameterAnnotation(it) }
+    }
+
+    private fun hasPreviewParameterAnnotation(param: KtParameter): Boolean {
+        return param.annotationEntries.any { annotation ->
+            val shortName = annotation.shortName?.asString()
+            shortName == "PreviewParameter" ||
+                annotation.text.contains("preview.annotations.PreviewParameter")
+        }
+    }
+
+    private fun extractParameterInfo(
+        param: KtParameter,
+        packageName: String,
+        ktFile: KtFile
+    ): ParameterInfo? {
+        val paramName = param.name ?: return null
+        val paramType = param.typeReference?.text ?: return null
+
+        val annotation = param.annotationEntries.firstOrNull {
+            it.shortName?.asString() == "PreviewParameter" ||
+                it.text.contains("preview.annotations.PreviewParameter")
+        } ?: return null
+
+        val providerClass = try {
+            extractProviderClass(annotation, packageName, ktFile)
+        } catch (e: IllegalArgumentException) {
+            System.err.println("Warning: Failed to extract provider for '$paramName': ${e.message}")
+            return null
+        }
+
+        return ParameterInfo(paramName, paramType, providerClass)
+    }
+
+    private fun extractProviderClass(
+        annotation: KtAnnotationEntry,
+        currentPackage: String,
+        ktFile: KtFile
+    ): String {
+        val classLiteral = annotation.valueArguments.firstOrNull()
+            ?.getArgumentExpression() as? KtClassLiteralExpression
+            ?: throw IllegalArgumentException("@PreviewParameter requires provider class")
+
+        val simpleName = classLiteral.receiverExpression?.text?.trim()
+            ?: throw IllegalArgumentException("Invalid class literal")
+
+        // Already fully-qualified?
+        if (simpleName.contains(".")) return simpleName
+
+        // Resolve from imports
+        val resolved = resolveClassFromImports(simpleName, ktFile.importDirectives)
+        if (resolved != null) return resolved
+
+        // Same package fallback
+        return if (currentPackage.isEmpty()) simpleName else "$currentPackage.$simpleName"
+    }
+
+    private fun resolveClassFromImports(
+        simpleName: String,
+        imports: List<KtImportDirective>
+    ): String? {
+        for (import in imports) {
+            val fqName = import.importedFqName ?: continue
+            if (import.isAllUnder) continue  // Skip wildcards (Phase 1 limitation)
+
+            // Match simple name
+            if (fqName.shortName().asString() == simpleName) {
+                return fqName.asString()
+            }
+
+            // Match alias
+            if (import.aliasName == simpleName) {
+                return fqName.asString()
+            }
+        }
+        return null
     }
 
     private fun deriveContainerJvmClassName(

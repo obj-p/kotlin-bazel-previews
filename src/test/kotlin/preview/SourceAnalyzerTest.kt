@@ -663,4 +663,205 @@ class SourceAnalyzerTest {
         assertEquals("Previews", result[0].jvmClassName)
         assertEquals(ContainerKind.OBJECT, result[0].containerKind)
     }
+
+    // --- Tests for @PreviewParameter support ---
+
+    @Test
+    fun extractsProviderFromSamePackage() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |
+            |@Preview
+            |fun preview(@PreviewParameter(UserProvider::class) user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("user", result[0].parameters[0].name)
+        assertEquals("User", result[0].parameters[0].type)
+        assertEquals("examples.UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun extractsProviderFromExplicitImport() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |import com.other.UserProvider
+            |
+            |@Preview
+            |fun preview(@PreviewParameter(UserProvider::class) user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("com.other.UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun extractsProviderFromImportAlias() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |import com.other.UserProvider as UP
+            |
+            |@Preview
+            |fun preview(@PreviewParameter(UP::class) user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("com.other.UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun extractsFullyQualifiedProvider() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |
+            |@Preview
+            |fun preview(@PreviewParameter(com.other.Provider::class) user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("com.other.Provider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun supportsZeroParametersBackwardCompatibility() {
+        val content = """
+            |package examples
+            |import preview.annotations.Preview
+            |
+            |@Preview
+            |fun preview() = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(0, result[0].parameters.size)
+    }
+
+    @Test
+    fun acceptsMultipleParameters() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |
+            |@Preview
+            |fun preview(
+            |    @PreviewParameter(UserProvider::class) user: User,
+            |    @PreviewParameter(ThemeProvider::class) theme: Theme
+            |) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals("preview", result[0].name)
+        assertEquals(2, result[0].parameters.size)
+        assertEquals("user", result[0].parameters[0].name)
+        assertEquals("theme", result[0].parameters[1].name)
+    }
+
+    @Test
+    fun rejectsParameterWithoutAnnotation() {
+        val content = """
+            |package examples
+            |
+            |@Preview
+            |fun preview(user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun extractsProviderInDefaultPackage() {
+        val content = """
+            |import preview.annotations.PreviewParameter
+            |
+            |@Preview
+            |fun preview(@PreviewParameter(UserProvider::class) user: User) = "Hello"
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun extractsProviderInObjectContainer() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |
+            |object Previews {
+            |    @Preview
+            |    fun preview(@PreviewParameter(UserProvider::class) user: User) = "Hello"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("examples.UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun extractsProviderInClassContainer() {
+        val content = """
+            |package examples
+            |import preview.annotations.PreviewParameter
+            |
+            |class Previews {
+            |    @Preview
+            |    fun preview(@PreviewParameter(UserProvider::class) user: User) = "Hello"
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "Test.kt")
+        assertEquals(1, result.size)
+        assertEquals(ContainerKind.CLASS, result[0].containerKind)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("examples.UserProvider", result[0].parameters[0].providerClass)
+    }
+
+    @Test
+    fun parsesParameterizedPreviewExample() {
+        val content = """
+            |package examples
+            |
+            |import preview.annotations.Preview
+            |import preview.annotations.PreviewParameter
+            |
+            |object ParameterizedPreview {
+            |
+            |    @Preview
+            |    fun userCard(@PreviewParameter(UserPreviewParameterProvider::class) user: User): String {
+            |        return "User Card"
+            |    }
+            |}
+        """.trimMargin()
+
+        val result = analyzer.findPreviewFunctionsFromContent(content, "ParameterizedPreview.kt")
+        assertEquals(1, result.size)
+        assertEquals("userCard", result[0].name)
+        assertEquals("examples", result[0].packageName)
+        assertEquals("examples.ParameterizedPreview", result[0].jvmClassName)
+        assertEquals(ContainerKind.OBJECT, result[0].containerKind)
+        assertEquals(1, result[0].parameters.size)
+        assertEquals("user", result[0].parameters[0].name)
+        assertEquals("User", result[0].parameters[0].type)
+        assertEquals("examples.UserPreviewParameterProvider", result[0].parameters[0].providerClass)
+    }
 }
