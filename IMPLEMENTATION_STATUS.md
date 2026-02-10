@@ -265,6 +265,81 @@ All critical issues resolved and minimal working version implemented.
 
 ---
 
+## Phase 2: Custom Display Names (COMPLETE ✅)
+
+Add support for custom display names via optional `getDisplayName()` method.
+
+### What's Done:
+- [x] Added `getDisplayName(index: Int): String?` to PreviewParameterProvider interface
+- [x] Updated ProviderInstance to store provider object and getDisplayName method
+- [x] Updated instantiateProvider() to detect getDisplayName via reflection
+- [x] Added buildDisplayName() helper with fallback logic
+- [x] Updated invocation loop to use buildDisplayName()
+- [x] Added 7 comprehensive test cases
+- [x] Updated UserProvider example with custom names
+- [x] All 118 tests passing (111 existing + 7 new)
+
+### Features:
+- **Custom Names**: Providers can return custom display names per value
+- **Backward Compatible**: Providers without getDisplayName() still work
+- **Graceful Fallback**: Null, blank, or exceptions fall back to index format
+- **Error Handling**: Exceptions logged to stderr but don't break preview generation
+
+### Example:
+```kotlin
+class UserProvider : PreviewParameterProvider<User> {
+    override val values = sequenceOf(
+        User("Alice", 25),
+        User("Bob", 35)
+    )
+
+    override fun getDisplayName(index: Int) = values.elementAtOrNull(index)?.name
+}
+
+// Generates previews:
+// - userCard[Alice]
+// - userCard[Bob]
+```
+
+### Files Modified:
+- Modified: `preview-annotations/src/main/kotlin/preview/annotations/PreviewParameterProvider.kt`
+  - Added `getDisplayName(index: Int): String?` method with default null implementation
+- Modified: `src/main/kotlin/preview/PreviewRunner.kt`
+  - Updated `ProviderInstance` constructor to accept provider instance and getDisplayName method
+  - Added `getDisplayName(index: Int): String?` method to ProviderInstance with error handling
+  - Updated `instantiateProvider()` to detect and store getDisplayName method via reflection
+  - Added `buildDisplayName(provider, index)` helper method with fallback logic
+  - Updated invocation loop to use buildDisplayName() instead of hardcoded index
+- Modified: `src/test/kotlin/preview/PreviewRunnerTest.kt`
+  - Added 7 new test cases for Phase 2 custom display names
+- Modified: `examples/UserProvider.kt`
+  - Added getDisplayName() implementation using user names
+
+### Test Coverage:
+1. ✅ Custom display names from provider
+2. ✅ Partial custom names (some null)
+3. ✅ Missing getDisplayName method (backward compatibility)
+4. ✅ getDisplayName throws exception (error handling)
+5. ✅ Blank/empty display names (fallback)
+6. ✅ Object provider with custom names
+7. ✅ Existing displayNameFormatting test still passes
+
+### Edge Cases Handled:
+| Case | Behavior | Status |
+|------|----------|--------|
+| Provider without getDisplayName() | Falls back to `[0]`, `[1]` format | ✅ Tested |
+| getDisplayName() returns null | Falls back to index | ✅ Tested |
+| getDisplayName() throws exception | Logs warning, falls back to index | ✅ Tested |
+| getDisplayName() returns empty string | Falls back to index | ✅ Tested |
+| getDisplayName() returns blank string | Falls back to index | ✅ Tested |
+| Object provider with getDisplayName() | Works same as class provider | ✅ Tested |
+
+**Build Status**: ✅ All tests pass (118/118 total)
+
+**Deliverable**: ✅ Custom display names with graceful fallback to index format
+
+---
+
 ## How to Continue
 
 ### For Next Agent/Session:

@@ -32,4 +32,15 @@ interface PreviewParameterProvider<T> {
      * (>100 values) may be truncated.
      */
     val values: Sequence<T>
+
+    /**
+     * Returns a custom display name for the value at the given index.
+     *
+     * If this method returns null or is not implemented, the default
+     * display name format "[index]" will be used.
+     *
+     * @param index The zero-based index of the value in the sequence
+     * @return A custom display name, or null to use the default format
+     */
+    fun getDisplayName(index: Int): String? = null
 }

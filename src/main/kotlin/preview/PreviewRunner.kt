@@ -88,16 +88,19 @@ object PreviewRunner {
         // Invoke once per value
         val results = mutableListOf<PreviewResult>()
         values.forEachIndexed { index, value ->
+            // Build display name: try custom, fall back to index
+            val displayName = buildDisplayName(provider, index)
+
             try {
                 val result = invokeSingle(loader, fn, listOf(value))
-                results.add(PreviewResult(fn.name, "[$index]", result = result))
+                results.add(PreviewResult(fn.name, displayName, result = result))
             } catch (e: Exception) {
                 val error = if (e is InvocationTargetException) {
                     (e.cause ?: e).message
                 } else {
                     e.message
                 }
-                results.add(PreviewResult(fn.name, "[$index]", error = error))
+                results.add(PreviewResult(fn.name, displayName, error = error))
             }
         }
 
@@ -183,14 +186,48 @@ object PreviewRunner {
 
         val valuesObject = valuesGetter.invoke(instance)
 
+        // Try to get getDisplayName method
+        val getDisplayNameMethod = try {
+            // Look for method with signature: String? getDisplayName(int)
+            // Use javaPrimitiveType to match JVM signature
+            providerClass.getMethod("getDisplayName", Int::class.javaPrimitiveType)
+        } catch (_: NoSuchMethodException) {
+            null  // Method doesn't exist - that's fine, it's optional
+        }
+
         // Convert to Sequence via reflection
-        return ProviderInstance(valuesObject)
+        return ProviderInstance(valuesObject, instance, getDisplayNameMethod)
+    }
+
+    /**
+     * Build display name for a parameterized preview result.
+     *
+     * Tries provider's getDisplayName() first, falls back to "[index]" format.
+     *
+     * @param provider The provider instance
+     * @param index Zero-based index of the value
+     * @return Display name string (never null)
+     */
+    private fun buildDisplayName(provider: ProviderInstance, index: Int): String {
+        // Try custom display name from provider
+        val customName = provider.getDisplayName(index)
+
+        // Use custom name if non-null and non-blank, otherwise use index
+        return if (customName != null && customName.isNotBlank()) {
+            "[$customName]"  // Wrap in brackets for consistency
+        } else {
+            "[$index]"  // Fall back to index
+        }
     }
 
     /**
      * Wrapper for provider instance that accesses values via reflection to avoid classloader issues.
      */
-    private class ProviderInstance(private val valuesObject: Any) {
+    private class ProviderInstance(
+        private val valuesObject: Any,
+        private val providerInstance: Any,
+        private val getDisplayNameMethod: java.lang.reflect.Method?
+    ) {
         val values: Sequence<Any?> get() {
             // The valuesObject is a Kotlin Sequence from a different classloader
             // We need to iterate it using reflection
@@ -200,6 +237,25 @@ object PreviewRunner {
             val iterator = iteratorMethod.invoke(valuesObject) as Iterator<*>
 
             return iterator.asSequence()
+        }
+
+        /**
+         * Get custom display name for value at given index.
+         * Returns null if method not available or returns null.
+         */
+        fun getDisplayName(index: Int): String? {
+            if (getDisplayNameMethod == null) return null
+
+            return try {
+                val result = getDisplayNameMethod.invoke(providerInstance, index)
+                result as? String
+            } catch (e: Exception) {
+                // Log warning but don't fail - fall back to index
+                System.err.println(
+                    "[Preview] Warning: getDisplayName($index) threw exception: ${e.message}"
+                )
+                null
+            }
         }
     }
 

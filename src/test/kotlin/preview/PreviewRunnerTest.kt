@@ -841,4 +841,196 @@ class PreviewRunnerTest {
         assertEquals("Patched: patched1", results[0].result)
         assertEquals("Patched: patched2", results[1].result)
     }
+
+    // --- Phase 2: Custom Display Names Tests ---
+
+    @Test
+    fun customDisplayNamesFromProvider() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "CustomNameProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class CustomNameProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("a", "b", "c")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("First", "Second", "Third").getOrNull(index)
+                        }
+                    }
+                """.trimIndent(),
+                "CustomPreview.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "CustomPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "CustomNameProvider"))
+        )
+
+        assertEquals(3, results.size)
+        assertEquals("preview[First]", results[0].fullDisplayName)
+        assertEquals("preview[Second]", results[1].fullDisplayName)
+        assertEquals("preview[Third]", results[2].fullDisplayName)
+    }
+
+    @Test
+    fun customDisplayNameReturnsNull() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "PartialNameProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class PartialNameProvider : PreviewParameterProvider<Int> {
+                        override val values = sequenceOf(1, 2, 3)
+
+                        override fun getDisplayName(index: Int): String? {
+                            return if (index == 1) "Middle" else null
+                        }
+                    }
+                """.trimIndent(),
+                "PartialPreview.kt" to """
+                    fun preview(arg: Int): String = "value:${'$'}arg"
+                """.trimIndent()
+            ),
+            className = "PartialPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "Int", "PartialNameProvider"))
+        )
+
+        assertEquals(3, results.size)
+        assertEquals("preview[0]", results[0].fullDisplayName)
+        assertEquals("preview[Middle]", results[1].fullDisplayName)
+        assertEquals("preview[2]", results[2].fullDisplayName)
+    }
+
+    @Test
+    fun missingGetDisplayNameMethod() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "NoDisplayNameProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class NoDisplayNameProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("x", "y")
+                    }
+                """.trimIndent(),
+                "SimplePreview.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "SimplePreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "NoDisplayNameProvider"))
+        )
+
+        assertEquals(2, results.size)
+        assertEquals("preview[0]", results[0].fullDisplayName)
+        assertEquals("preview[1]", results[1].fullDisplayName)
+    }
+
+    @Test
+    fun getDisplayNameThrowsException() {
+        val originalErr = System.err
+        val errCapture = java.io.ByteArrayOutputStream()
+        System.setErr(java.io.PrintStream(errCapture))
+
+        try {
+            val results = compileKotlinAndInvokeList(
+                mapOf(
+                    "ThrowingProvider.kt" to """
+                        import preview.annotations.PreviewParameterProvider
+
+                        class ThrowingProvider : PreviewParameterProvider<String> {
+                            override val values = sequenceOf("a", "b")
+
+                            override fun getDisplayName(index: Int): String? {
+                                throw RuntimeException("Display name error")
+                            }
+                        }
+                    """.trimIndent(),
+                    "ThrowPreview.kt" to """
+                        fun preview(arg: String): String = arg
+                    """.trimIndent()
+                ),
+                className = "ThrowPreviewKt",
+                methodName = "preview",
+                parameters = listOf(ParameterInfo("arg", "String", "ThrowingProvider"))
+            )
+
+            assertEquals(2, results.size)
+            assertEquals("preview[0]", results[0].fullDisplayName)
+            assertEquals("preview[1]", results[1].fullDisplayName)
+
+            val errOutput = errCapture.toString()
+            assertTrue(errOutput.contains("getDisplayName"))
+            assertTrue(errOutput.contains("exception"))
+        } finally {
+            System.setErr(originalErr)
+        }
+    }
+
+    @Test
+    fun blankDisplayNamesFallBackToIndex() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "BlankNameProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    class BlankNameProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("a", "b", "c")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return when (index) {
+                                0 -> ""
+                                1 -> "   "
+                                2 -> "Valid"
+                                else -> null
+                            }
+                        }
+                    }
+                """.trimIndent(),
+                "BlankPreview.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "BlankPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "BlankNameProvider"))
+        )
+
+        assertEquals(3, results.size)
+        assertEquals("preview[0]", results[0].fullDisplayName)
+        assertEquals("preview[1]", results[1].fullDisplayName)
+        assertEquals("preview[Valid]", results[2].fullDisplayName)
+    }
+
+    @Test
+    fun objectProviderWithCustomNames() {
+        val results = compileKotlinAndInvokeList(
+            mapOf(
+                "ObjectProvider.kt" to """
+                    import preview.annotations.PreviewParameterProvider
+
+                    object ObjectProvider : PreviewParameterProvider<String> {
+                        override val values = sequenceOf("alpha", "beta")
+
+                        override fun getDisplayName(index: Int): String? {
+                            return listOf("Greek-1", "Greek-2").getOrNull(index)
+                        }
+                    }
+                """.trimIndent(),
+                "ObjectPreview.kt" to """
+                    fun preview(arg: String): String = arg
+                """.trimIndent()
+            ),
+            className = "ObjectPreviewKt",
+            methodName = "preview",
+            parameters = listOf(ParameterInfo("arg", "String", "ObjectProvider"))
+        )
+
+        assertEquals(2, results.size)
+        assertEquals("preview[Greek-1]", results[0].fullDisplayName)
+        assertEquals("preview[Greek-2]", results[1].fullDisplayName)
+    }
 }
