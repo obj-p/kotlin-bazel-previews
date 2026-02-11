@@ -143,31 +143,49 @@ class PreviewServer(
 fun buildJsonOutput(
     functions: List<FunctionInfo>,
     invoker: (FunctionInfo) -> List<PreviewResult>,
+    includeMetadata: Boolean = false
 ): String {
     if (functions.isEmpty()) return "{\"previews\":[]}"
 
-    val results = mutableListOf<String>()
+    val allResults = mutableListOf<PreviewResult>()
+    val allFunctions = mutableListOf<FunctionInfo>()
+
     for (fn in functions) {
         try {
-            val previewResults = invoker(fn)
-            for (pr in previewResults) {
-                val obj = buildString {
-                    append("  {")
-                    append("\"name\":${jsonString(pr.fullDisplayName)}")
-                    if (pr.error != null) {
-                        append(",\"error\":${jsonString(pr.error)}")
-                    } else {
-                        append(",\"result\":${jsonString(pr.result)}")
-                    }
-                    append("}")
-                }
-                results.add(obj)
-            }
+            val results = invoker(fn)
+            allResults.addAll(results)
+            allFunctions.add(fn)
         } catch (e: Exception) {
-            results.add("  {\"name\":${jsonString(fn.name)},\"error\":${jsonString(e.message)}}")
+            val errorType = PreviewError.InvocationFailed(
+                displayName = fn.name,
+                cause = e.message ?: e.javaClass.simpleName
+            )
+            allResults.add(PreviewResult(fn.name, null, error = errorType.message, errorType = errorType))
         }
     }
-    return "{\"previews\":[\n${results.joinToString(",\n")}\n]}"
+
+    val previews = allResults.map { it.toJsonPreview() }
+
+    val metadata = if (includeMetadata) {
+        JsonMetadata(
+            totalCount = previews.size,
+            successCount = previews.count { it.error == null },
+            errorCount = previews.count { it.error != null },
+            parameters = allFunctions.flatMap { fn ->
+                fn.parameters.map { param ->
+                    JsonParameter(
+                        name = param.name,
+                        type = param.type,
+                        provider = param.providerClass,
+                        limit = param.limit.takeIf { it > 0 }
+                    )
+                }
+            }.distinctBy { "${it.name}:${it.provider}" }  // Deduplicate
+        )
+    } else null
+
+    val output = JsonOutput(previews, metadata)
+    return output.toJsonString()
 }
 
 fun jsonString(value: String?): String {

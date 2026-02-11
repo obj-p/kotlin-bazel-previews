@@ -27,9 +27,11 @@ import kotlin.reflect.KClass
  * This generates two previews: one with Alice and one with Bob.
  *
  * @param provider The [PreviewParameterProvider] class that supplies values for this parameter
+ * @param limit Maximum number of values to take from the provider. Use -1 (default) to use the global default limit (100).
  */
 @Target(AnnotationTarget.VALUE_PARAMETER)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class PreviewParameter(
-    val provider: KClass<out PreviewParameterProvider<*>>
+    val provider: KClass<out PreviewParameterProvider<*>>,
+    val limit: Int = -1
 )
